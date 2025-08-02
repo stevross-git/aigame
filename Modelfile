@@ -1,0 +1,18 @@
+FROM deepseek-r1:1.5b
+
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER num_train_epochs 3
+PARAMETER batch_size 4
+PARAMETER learning_rate 2e-5
+PARAMETER gradient_accumulation_steps 2
+PARAMETER optimizer adamw
+PARAMETER weight_decay 0.01
+PARAMETER lr_scheduler linear
+PARAMETER warmup_steps 100
+
+TEMPLATE """NPC STATE:
+{{ .Prompt }}
+
+NPC DECISION (JSON):
+{{ .Response }}"""

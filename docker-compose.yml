@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  ai-sims:
+    build: .
+    container_name: ai-sims-game
+    ports:
+      - "11434:11434"  # Ollama API
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./game_memories.db:/app/game_memories.db
+      - ./savegame.json:/app/savegame.json
+    environment:
+      - DISPLAY=${DISPLAY}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    network_mode: host
+    stdin_open: true
+    tty: true
