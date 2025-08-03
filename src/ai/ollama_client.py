@@ -1,9 +1,12 @@
 import ollama
 import json
 import logging
-from typing import Dict, List, Optional
+import threading
+import time
+from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
 from src.ai.api_fallback import APIFallbackClient
+from src.ai.predictive_cache import PredictiveAICache
 
 @dataclass
 class AIResponse:
@@ -14,32 +17,51 @@ class AIResponse:
     reasoning: Optional[str] = None
 
 class OllamaClient:
-    def __init__(self, model_name: str = "llama2"):
+    def __init__(self, model_name: str = "llama2", disable_ollama: bool = False):
         self.model_name = model_name
-        self.client = ollama.Client()
+        self.disable_ollama = disable_ollama
+        self.client = None if disable_ollama else ollama.Client()
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
         
         self.fallback_client = APIFallbackClient()
-        self.use_fallback = False
+        self.use_fallback = disable_ollama  # Start with fallback if Ollama disabled
         
-        try:
-            models = self.client.list()
-            self.logger.info(f"Available models: {models}")
-        except Exception as e:
-            self.logger.error(f"Failed to connect to Ollama: {e}")
-            self.use_fallback = True
+        # Async response handling
+        self.pending_requests: Dict[str, Dict] = {}
+        self.response_callbacks: Dict[str, Callable] = {}
+        self.request_counter = 0
+        
+        # Predictive cache
+        self.predictive_cache = PredictiveAICache(self, max_cache_size=500, cache_ttl=1800)  # 30 min TTL
+        
+        if not disable_ollama:
+            try:
+                models = self.client.list()
+                self.logger.info(f"Available models: {models}")
+            except Exception as e:
+                self.logger.error(f"Failed to connect to Ollama: {e}")
+                self.use_fallback = True
+        else:
+            self.logger.info("Ollama disabled by configuration, using API fallback only")
     
     def make_decision(self, npc_data: Dict, context: Dict) -> AIResponse:
+        # Check cache first
+        cached_response = self.predictive_cache.get_cached_response(npc_data, context)
+        if cached_response:
+            self.logger.debug(f"Using cached response for {npc_data.get('name', 'unknown')}")
+            return cached_response
+        
+        # Generate new response
         prompt = self._build_prompt(npc_data, context)
         
         try:
             if self.use_fallback:
                 result = self.fallback_client.make_decision(prompt)
                 self.logger.info(f"Using {result['provider']} (response time: {result['response_time']:.2f}s)")
-                return self._parse_response(result['response'])
+                response = self._parse_response(result['response'])
             else:
-                response = self.client.generate(
+                api_response = self.client.generate(
                     model=self.model_name,
                     prompt=prompt,
                     options={
@@ -48,7 +70,11 @@ class OllamaClient:
                         "max_tokens": 150
                     }
                 )
-                return self._parse_response(response['response'])
+                response = self._parse_response(api_response['response'])
+            
+            # Cache the response
+            self.predictive_cache.cache_response(npc_data, context, response)
+            return response
             
         except Exception as e:
             self.logger.error(f"AI request failed: {e}")
@@ -58,11 +84,109 @@ class OllamaClient:
                 try:
                     result = self.fallback_client.make_decision(prompt)
                     self.logger.info(f"Fallback successful using {result['provider']}")
-                    return self._parse_response(result['response'])
+                    response = self._parse_response(result['response'])
+                    
+                    # Cache the fallback response
+                    self.predictive_cache.cache_response(npc_data, context, response)
+                    return response
                 except Exception as fallback_error:
                     self.logger.error(f"Fallback also failed: {fallback_error}")
             
             return self._get_fallback_decision(npc_data, context)
+    
+    def make_decision_async(self, npc_data: Dict, context: Dict, callback: Callable[[AIResponse], None]) -> str:
+        """
+        Make an AI decision asynchronously. Returns a request ID.
+        The callback will be called with the result when ready.
+        """
+        # Check cache first
+        cached_response = self.predictive_cache.get_cached_response(npc_data, context)
+        if cached_response:
+            self.logger.debug(f"Using cached response for async request: {npc_data.get('name', 'unknown')}")
+            # Call callback immediately with cached response
+            callback(cached_response)
+            return f"cached_{time.time()}"
+        
+        self.request_counter += 1
+        request_id = f"req_{self.request_counter}_{time.time()}"
+        
+        # Store the callback
+        self.response_callbacks[request_id] = callback
+        
+        # Store request info
+        self.pending_requests[request_id] = {
+            'npc_data': npc_data,
+            'context': context,
+            'start_time': time.time()
+        }
+        
+        # Start the AI request in a background thread
+        thread = threading.Thread(
+            target=self._process_async_request,
+            args=(request_id, npc_data, context),
+            daemon=True
+        )
+        thread.start()
+        
+        return request_id
+    
+    def _process_async_request(self, request_id: str, npc_data: Dict, context: Dict):
+        """Process an AI request in the background"""
+        try:
+            # Use the existing make_decision method (which handles caching internally)
+            response = self.make_decision(npc_data, context)
+            
+            # Call the callback with the result
+            if request_id in self.response_callbacks:
+                callback = self.response_callbacks[request_id]
+                callback(response)
+                
+                # Clean up
+                del self.response_callbacks[request_id]
+                if request_id in self.pending_requests:
+                    del self.pending_requests[request_id]
+                    
+        except Exception as e:
+            self.logger.error(f"Async AI request {request_id} failed: {e}")
+            
+            # Provide fallback response
+            if request_id in self.response_callbacks:
+                callback = self.response_callbacks[request_id]
+                fallback_response = self._get_fallback_decision(npc_data, context)
+                # Cache the fallback response too
+                self.predictive_cache.cache_response(npc_data, context, fallback_response)
+                callback(fallback_response)
+                
+                # Clean up
+                del self.response_callbacks[request_id]
+                if request_id in self.pending_requests:
+                    del self.pending_requests[request_id]
+    
+    def cancel_request(self, request_id: str) -> bool:
+        """Cancel a pending async request"""
+        if request_id in self.response_callbacks:
+            del self.response_callbacks[request_id]
+        if request_id in self.pending_requests:
+            del self.pending_requests[request_id]
+            return True
+        return False
+    
+    def get_pending_request_count(self) -> int:
+        """Get the number of pending async requests"""
+        return len(self.pending_requests)
+    
+    def get_cache_stats(self) -> Dict:
+        """Get cache performance statistics"""
+        return self.predictive_cache.get_cache_stats()
+    
+    def invalidate_npc_cache(self, npc_id: str, context_changes: Dict):
+        """Invalidate cache for an NPC when context changes significantly"""
+        self.predictive_cache.invalidate_npc_cache(npc_id, context_changes)
+    
+    def shutdown(self):
+        """Shutdown the AI client and cache system"""
+        if hasattr(self, 'predictive_cache'):
+            self.predictive_cache.shutdown()
     
     def _build_prompt(self, npc_data: Dict, context: Dict) -> str:
         prompt = f"""You are {npc_data['name']}, an NPC in a life simulation game.

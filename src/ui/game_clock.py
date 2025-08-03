@@ -18,11 +18,11 @@ class GameClock:
         self.font_date = pygame.font.Font(None, 20)
         self.font_small = pygame.font.Font(None, 16)
         
-        # Clock position (top center)
-        self.clock_width = 280
-        self.clock_height = 80
-        self.clock_x = (SCREEN_WIDTH - self.clock_width) // 2
-        self.clock_y = 10
+        # Clock position and size (draggable)
+        self.width = 280
+        self.height = 80
+        self.x = (SCREEN_WIDTH - self.width) // 2
+        self.y = 10
         
         # Animation
         self.animation_time = 0.0
@@ -73,56 +73,56 @@ class GameClock:
     def _draw_clock_panel(self, time_info: Dict):
         """Draw the main clock background panel"""
         # Create panel with seasonal color accent
-        panel_surface = pygame.Surface((self.clock_width, self.clock_height), pygame.SRCALPHA)
+        panel_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
         
         # Main background
         pygame.draw.rect(panel_surface, self.bg_color, 
-                        (0, 0, self.clock_width, self.clock_height), border_radius=12)
+                        (0, 0, self.width, self.height), border_radius=12)
         
         # Seasonal accent border
         season_color = time_info['season_color']
         border_color = (*season_color, 150)
         pygame.draw.rect(panel_surface, border_color, 
-                        (0, 0, self.clock_width, self.clock_height), 3, border_radius=12)
+                        (0, 0, self.width, self.height), 3, border_radius=12)
         
         # Glass highlight effect
         highlight_color = (255, 255, 255, 30)
-        highlight_rect = pygame.Rect(2, 2, self.clock_width - 4, self.clock_height // 3)
+        highlight_rect = pygame.Rect(2, 2, self.width - 4, self.height // 3)
         pygame.draw.rect(panel_surface, highlight_color, highlight_rect, border_radius=10)
         
         # Subtle pulsing effect based on time
         pulse = math.sin(self.animation_time * 2) * 10 + 20
         glow_color = (*time_info['time_period_color'], int(pulse))
-        glow_surface = pygame.Surface((self.clock_width + 6, self.clock_height + 6), pygame.SRCALPHA)
+        glow_surface = pygame.Surface((self.width + 6, self.height + 6), pygame.SRCALPHA)
         pygame.draw.rect(glow_surface, glow_color, 
-                        (0, 0, self.clock_width + 6, self.clock_height + 6), border_radius=15)
+                        (0, 0, self.width + 6, self.height + 6), border_radius=15)
         
         # Blit glow first, then panel
-        glow_rect = glow_surface.get_rect(center=(self.clock_x + self.clock_width // 2, 
-                                                 self.clock_y + self.clock_height // 2))
+        glow_rect = glow_surface.get_rect(center=(self.x + self.width // 2, 
+                                                 self.y + self.height // 2))
         self.screen.blit(glow_surface, glow_rect)
-        self.screen.blit(panel_surface, (self.clock_x, self.clock_y))
+        self.screen.blit(panel_surface, (self.x, self.y))
     
     def _draw_time_info(self, time_info: Dict):
         """Draw main time and date information"""
         # Main time display (larger)
         time_text = self.font_time.render(time_info['time'], True, self.text_color)
-        time_rect = time_text.get_rect(center=(self.clock_x + self.clock_width // 2, 
-                                              self.clock_y + 20))
+        time_rect = time_text.get_rect(center=(self.x + self.width // 2, 
+                                              self.y + 20))
         self.screen.blit(time_text, time_rect)
         
         # Date information (day name and date)
         date_str = f"{time_info['day_name']}, Day {time_info['day']}"
         date_text = self.font_date.render(date_str, True, (200, 200, 200))
-        date_rect = date_text.get_rect(center=(self.clock_x + self.clock_width // 2, 
-                                              self.clock_y + 45))
+        date_rect = date_text.get_rect(center=(self.x + self.width // 2, 
+                                              self.y + 45))
         self.screen.blit(date_text, date_rect)
         
         # Extended date info (week, month, year)
         extended_str = f"Week {time_info['week']} • {time_info['month_name']} • Year {time_info['year']}"
         extended_text = self.font_small.render(extended_str, True, (180, 180, 180))
-        extended_rect = extended_text.get_rect(center=(self.clock_x + self.clock_width // 2, 
-                                                      self.clock_y + 62))
+        extended_rect = extended_text.get_rect(center=(self.x + self.width // 2, 
+                                                      self.y + 62))
         self.screen.blit(extended_text, extended_rect)
     
     def _draw_period_indicators(self, time_info: Dict):
@@ -131,21 +131,21 @@ class GameClock:
         season = time_info['season']
         season_symbol = self.season_symbols.get(season, "🌍")
         season_text = self.font_date.render(f"{season_symbol} {season}", True, time_info['season_color'])
-        season_rect = season_text.get_rect(center=(self.clock_x + 40, self.clock_y + 20))
+        season_rect = season_text.get_rect(center=(self.x + 40, self.y + 20))
         self.screen.blit(season_text, season_rect)
         
         # Time period indicator (right side)
         time_period = time_info['time_period']
         period_symbol = self.time_period_symbols.get(time_period, "🕐")
         period_text = self.font_date.render(f"{period_symbol} {time_period}", True, time_info['time_period_color'])
-        period_rect = period_text.get_rect(center=(self.clock_x + self.clock_width - 50, self.clock_y + 20))
+        period_rect = period_text.get_rect(center=(self.x + self.width - 50, self.y + 20))
         self.screen.blit(period_text, period_rect)
         
         # Weekend indicator
         if time_info['is_weekend']:
             weekend_text = self.font_small.render("🎉 Weekend!", True, (255, 200, 100))
-            weekend_rect = weekend_text.get_rect(center=(self.clock_x + self.clock_width - 50, 
-                                                        self.clock_y + 35))
+            weekend_rect = weekend_text.get_rect(center=(self.x + self.width - 50, 
+                                                        self.y + 35))
             self.screen.blit(weekend_text, weekend_rect)
     
     def _draw_progress_indicators(self, game_time):
@@ -154,8 +154,8 @@ class GameClock:
         bar_width = 60
         bar_height = 4
         bar_spacing = 70
-        start_x = self.clock_x + 10
-        progress_y = self.clock_y + self.clock_height - 12
+        start_x = self.x + 10
+        progress_y = self.y + self.height - 12
         
         # Progress data
         progress_data = [
@@ -192,8 +192,8 @@ class GameClock:
         """Draw a small analog clock (optional enhancement)"""
         # Mini analog clock in corner
         clock_radius = 15
-        clock_center_x = self.clock_x + self.clock_width - 25
-        clock_center_y = self.clock_y + 45
+        clock_center_x = self.x + self.width - 25
+        clock_center_y = self.y + 45
         
         # Clock face
         pygame.draw.circle(self.screen, (40, 40, 40), (clock_center_x, clock_center_y), clock_radius)
@@ -234,7 +234,7 @@ class GameClock:
         """Handle clock-related events (like clicking to change format)"""
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             # Check if clicked on clock area
-            clock_rect = pygame.Rect(self.clock_x, self.clock_y, self.clock_width, self.clock_height)
+            clock_rect = pygame.Rect(self.x, self.y, self.width, self.height)
             if clock_rect.collidepoint(event.pos):
                 # Could toggle 12/24 hour format or show detailed time info
                 return True

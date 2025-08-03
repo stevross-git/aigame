@@ -8,7 +8,7 @@ class GameTime:
     
     def __init__(self):
         # Time configuration
-        self.seconds_per_game_minute = 1.0  # 1 real second = 1 game minute
+        self.seconds_per_game_minute = 30.0  # 30 real seconds = 1 game minute
         self.minutes_per_game_hour = 60
         self.hours_per_game_day = 24
         self.days_per_game_week = 7
@@ -110,6 +110,20 @@ class GameTime:
         """Get the current season"""
         season_index = ((self.month - 1) // 3) % 4
         return self.seasons[season_index]
+    
+    def get_date_string(self) -> str:
+        """Get formatted date string"""
+        day_name = self.get_day_name()
+        month_name = self.get_month_name()
+        return f"{day_name}, {month_name} {self.day}, Year {self.year}"
+    
+    def get_day_of_season(self) -> int:
+        """Get the day within the current season (1-based)"""
+        # Each season is 3 months, each month has days_per_game_month days
+        days_per_season = 3 * self.days_per_game_month
+        season_start_month = ((self.month - 1) // 3) * 3 + 1
+        days_into_season = (self.month - season_start_month) * self.days_per_game_month + self.day
+        return days_into_season
     
     def get_season_color(self) -> Tuple[int, int, int]:
         """Get color associated with current season"""

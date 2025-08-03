@@ -51,13 +51,22 @@ class SaveSystem:
         serialized_npcs = []
         
         for npc in npcs:
+            # Get emotion from emotional_state if available
+            emotion = None
+            if hasattr(npc, 'emotional_state') and hasattr(npc.emotional_state, 'primary_emotion'):
+                emotion = npc.emotional_state.primary_emotion.value
+            elif hasattr(npc, 'emotion'):
+                emotion = npc.emotion
+            else:
+                emotion = 'neutral'
+            
             npc_data = {
                 "name": npc.name,
                 "position": {"x": npc.rect.x, "y": npc.rect.y},
                 "personality": npc.personality.traits,
                 "needs": npc.needs.copy(),
                 "relationships": npc.relationships.copy(),
-                "emotion": npc.emotion,
+                "emotion": emotion,
                 "state": npc.state,
                 "memory": npc.memory[-50:] if npc.memory else [],  # Keep last 50 memories
                 "target_pos": {
@@ -100,7 +109,13 @@ class SaveSystem:
             
             npc.needs = npc_data["needs"]
             npc.relationships = npc_data["relationships"]
-            npc.emotion = npc_data["emotion"]
+            # Set emotion properly based on NPC type
+            if hasattr(npc, 'emotional_state') and hasattr(npc.emotional_state, 'primary_emotion'):
+                # For EnhancedNPC, we would need to reconstruct the emotional state
+                # For now, just use the default emotional state
+                pass
+            elif hasattr(npc, 'emotion'):
+                npc.emotion = npc_data["emotion"]
             npc.state = npc_data["state"]
             npc.memory = npc_data["memory"]
             

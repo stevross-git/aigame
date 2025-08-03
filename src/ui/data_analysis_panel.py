@@ -472,7 +472,16 @@ class DataAnalysisPanel:
         surface.blit(name_surface, (x + 10, y + 5))
         
         # Current state and emotion
-        state_text = f"State: {npc.state} | Emotion: {npc.emotion}"
+        # Get emotion from emotional_state if available
+        emotion = None
+        if hasattr(npc, 'emotional_state') and hasattr(npc.emotional_state, 'primary_emotion'):
+            emotion = npc.emotional_state.primary_emotion.value
+        elif hasattr(npc, 'emotion'):
+            emotion = npc.emotion
+        else:
+            emotion = 'neutral'
+        
+        state_text = f"State: {npc.state} | Emotion: {emotion}"
         state_surface = self.font_small.render(state_text, True, self.text_color)
         surface.blit(state_surface, (x + 10, y + 25))
         

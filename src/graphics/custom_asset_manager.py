@@ -9,7 +9,19 @@ class CustomAssetManager:
     from the ./images directory instead of generating programmatic pixel art.
     """
     
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(CustomAssetManager, cls).__new__(cls)
+        return cls._instance
+    
     def __init__(self):
+        # Only initialize once using singleton pattern
+        if CustomAssetManager._initialized:
+            return
+            
         self.sprites: Dict[str, pygame.Surface] = {}
         self.textures: Dict[str, pygame.Surface] = {}
         self.icons: Dict[str, pygame.Surface] = {}
@@ -24,9 +36,16 @@ class CustomAssetManager:
         
         if not os.path.exists(self.images_dir):
             print(f"Warning: Images directory '{self.images_dir}' not found!")
+            CustomAssetManager._initialized = True
             return
         
+        print("Loading assets for the first time...")
         self._load_all_assets()
+        CustomAssetManager._initialized = True
+        print("Asset loading completed!")
+        
+        # Show what was loaded
+        self._print_asset_summary()
     
     def _load_all_assets(self):
         """Load all custom assets from the images directory"""
@@ -34,110 +53,177 @@ class CustomAssetManager:
         self._load_buildings()
         self._load_characters()
         self._load_ui_elements()
+        self._load_scene_backgrounds()
+        self._load_decorative_elements()
         self._create_fallback_assets()
     
     def _load_terrain_and_tilesets(self):
         """Load terrain textures and tilesets"""
         
-        # Load grass tileset
-        grass_path = os.path.join(self.images_dir, "grasstileset.png")
-        if os.path.exists(grass_path):
-            grass_tileset = pygame.image.load(grass_path).convert_alpha()
-            self.tilesets["grass_tileset"] = grass_tileset
-            
-            # Extract individual grass tiles (assuming 32x32 tiles)
-            tile_size = 32
-            grass_tiles = []
-            tileset_width = grass_tileset.get_width() // tile_size
-            tileset_height = grass_tileset.get_height() // tile_size
-            
-            for y in range(min(4, tileset_height)):  # Get first 4 rows
-                for x in range(min(4, tileset_width)):  # Get first 4 columns
-                    tile_rect = pygame.Rect(x * tile_size, y * tile_size, tile_size, tile_size)
-                    tile_surface = pygame.Surface((tile_size, tile_size), pygame.SRCALPHA)
-                    tile_surface.blit(grass_tileset, (0, 0), tile_rect)
-                    grass_tiles.append(tile_surface)
-            
-            # Use first tile as main grass texture
-            if grass_tiles:
-                self.textures["grass"] = grass_tiles[0]
-                # Store additional grass variants
-                for i, tile in enumerate(grass_tiles[1:5]):  # Store up to 4 variants
-                    self.textures[f"grass_variant_{i}"] = tile
+        # Load grass textures from nature/environment folder
+        grass_files = ["grass.png", "grass1.png", "grasstileset.png"]
+        
+        for i, grass_file in enumerate(grass_files):
+            grass_path = os.path.join(self.images_dir, "nature", "environment", grass_file)
+            if os.path.exists(grass_path):
+                grass_img = pygame.image.load(grass_path).convert_alpha()
+                
+                if grass_file == "grasstileset.png":
+                    # Handle tileset
+                    self.tilesets["grass_tileset"] = grass_img
+                    
+                    # Extract individual grass tiles (assuming 32x32 tiles)
+                    tile_size = 32
+                    grass_tiles = []
+                    tileset_width = grass_img.get_width() // tile_size
+                    tileset_height = grass_img.get_height() // tile_size
+                    
+                    for y in range(min(4, tileset_height)):  # Get first 4 rows
+                        for x in range(min(4, tileset_width)):  # Get first 4 columns
+                            tile_rect = pygame.Rect(x * tile_size, y * tile_size, tile_size, tile_size)
+                            tile_surface = pygame.Surface((tile_size, tile_size), pygame.SRCALPHA)
+                            tile_surface.blit(grass_img, (0, 0), tile_rect)
+                            grass_tiles.append(tile_surface)
+                    
+                    # Use first tile as main grass texture if not already set
+                    if grass_tiles and "grass" not in self.textures:
+                        self.textures["grass"] = grass_tiles[0]
+                        # Store additional grass variants
+                        for j, tile in enumerate(grass_tiles[1:5]):  # Store up to 4 variants
+                            self.textures[f"grass_variant_{j}"] = tile
+                else:
+                    # Handle individual grass files
+                    if i == 0:
+                        self.textures["grass"] = grass_img
+                    else:
+                        self.textures[f"grass_variant_{i-1}"] = grass_img
         
         # Load mountain/terrain for decorative elements
-        mountain_path = os.path.join(self.images_dir, "mountian.png")  # Note the typo in filename
+        mountain_path = os.path.join(self.images_dir, "nature", "environment", "mountain.png")
         if os.path.exists(mountain_path):
             mountain_img = pygame.image.load(mountain_path).convert_alpha()
             # Scale down for use as terrain decoration
             mountain_scaled = pygame.transform.scale(mountain_img, (64, 64))
             self.sprites["mountain"] = mountain_scaled
         
-        # Load fences and walls
-        fences_path = os.path.join(self.images_dir, "fences, walls, bridges.png")
-        if os.path.exists(fences_path):
-            fences_img = pygame.image.load(fences_path).convert_alpha()
-            self.tilesets["fences"] = fences_img
-            
-            # Extract fence pieces (assuming tileset format)
-            fence_size = 32
-            if fences_img.get_width() >= fence_size and fences_img.get_height() >= fence_size:
-                fence_rect = pygame.Rect(0, 0, fence_size, fence_size)
-                fence_surface = pygame.Surface((fence_size, fence_size), pygame.SRCALPHA)
-                fence_surface.blit(fences_img, (0, 0), fence_rect)
-                self.sprites["fence"] = fence_surface
+        # Load fences and walls from nature/environment folder
+        fence_files = ["fences, walls, bridges.png", "fences_walls_bridges.png"]
+        for fence_file in fence_files:
+            fences_path = os.path.join(self.images_dir, "nature", "environment", fence_file)
+            if os.path.exists(fences_path):
+                fences_img = pygame.image.load(fences_path).convert_alpha()
+                self.tilesets["fences"] = fences_img
+                # Extract fence pieces (assuming tileset format)
+                fence_size = 32
+                if fences_img.get_width() >= fence_size and fences_img.get_height() >= fence_size:
+                    fence_rect = pygame.Rect(0, 0, fence_size, fence_size)
+                    fence_surface = pygame.Surface((fence_size, fence_size), pygame.SRCALPHA)
+                    fence_surface.blit(fences_img, (0, 0), fence_rect)
+                    self.sprites["fence"] = fence_surface
+                break
     
     def _load_buildings(self):
         """Load building sprites from custom images"""
         
         building_mappings = {
-            "house": "house.png",
-            "house_small": "house.png",
-            "house_large": "2storybuilding.png",
-            "shop": "shop.png", 
-            "market_hall": "townhall.png",
-            "community_center": "townhall.png",
-            "hospital": "hospital.png",
-            "school": "school.png",
-            "restaurant": "restaurant.png",
-            "office": "office.png",
-            "2story": "2storybuilding.png"
+            # Residential Buildings (buildings/houses/)
+            "house": ("buildings/houses", "house.png"),
+            "house_small": ("buildings/houses", "house.png"),
+            "house_large": ("buildings/houses", "2story_building.png"),
+            "2story": ("buildings/houses", "2story_building.png"),
+            "mansion": ("buildings/houses", "mansion.png"),
+            "home_asc": ("buildings/houses", "home asc.png"),
+            "player_house": ("buildings/houses", "house.png"),
+            "farm": ("buildings/houses", "farm_1.png"),
+            "farm_1": ("buildings/houses", "farm_1.png"),
+            "farmhouse": ("buildings/houses", "farmhouse_interior.png"),
+            
+            # Commercial Buildings (buildings/shops/)
+            "shop": ("buildings/shops", "shop.png"),
+            "general_store": ("buildings/shops", "shop.png"),
+            "blacksmith": ("buildings/shops", "blacksmith_shop.png"),
+            "blacksmith_shop": ("buildings/shops", "blacksmith_shop.png"),
+            "restaurant": ("buildings/shops", "restaurant.png"),
+            "fish_shop": ("buildings/shops", "fish_shop.png"),
+            "gems_store": ("buildings/shops", "gems_store.png"),
+            "hardware_store": ("buildings/shops", "hardware_store.png"),
+            
+            # Public Buildings (buildings/public/)
+            "town_hall": ("buildings/public", "town_hall.png"),
+            "townhall": ("buildings/public", "townhall.png"),
+            "market_hall": ("buildings/public", "town_hall.png"),
+            "community_center": ("buildings/public", "town_hall.png"),
+            "hospital": ("buildings/public", "hospital.png"),
+            "hospital_1": ("buildings/public", "hospital_1.png"),
+            "school": ("buildings/public", "school.png"),
+            "school_1": ("buildings/public", "school_1.png"),
+            "office": ("buildings/public", "office.png"),
+            "hotel": ("buildings/public", "hotel.png"),
         }
         
-        for building_type, filename in building_mappings.items():
-            file_path = os.path.join(self.images_dir, filename)
+        for building_type, (folder, filename) in building_mappings.items():
+            file_path = os.path.join(self.images_dir, folder, filename)
             if os.path.exists(file_path):
                 try:
                     building_img = pygame.image.load(file_path).convert_alpha()
-                    # Scale buildings to appropriate size for game (64x64 or larger)
-                    if building_type == "community_center":
-                        # Community center can be larger
+                    # Scale buildings to appropriate size for game
+                    if building_type in ["mansion"]:
+                        # Largest buildings
+                        scaled_img = pygame.transform.scale(building_img, (128, 96))
+                    elif building_type in ["community_center", "town_hall", "townhall", "hospital", "school", "hotel"]:
+                        # Large public buildings
                         scaled_img = pygame.transform.scale(building_img, (96, 80))
+                    elif building_type in ["2story", "house_large", "office", "hospital_1", "school_1"]:
+                        # Medium buildings
+                        scaled_img = pygame.transform.scale(building_img, (80, 70))
+                    elif building_type in ["blacksmith", "blacksmith_shop", "restaurant", "gems_store", "hardware_store"]:
+                        # Specialized shops - medium size
+                        scaled_img = pygame.transform.scale(building_img, (70, 65))
+                    elif building_type in ["farm", "farm_1", "farmhouse"]:
+                        # Farm buildings - wider
+                        scaled_img = pygame.transform.scale(building_img, (90, 65))
                     else:
-                        # Standard building size
+                        # Standard building size (houses, small shops)
                         scaled_img = pygame.transform.scale(building_img, (64, 64))
                     
                     self.sprites[building_type] = scaled_img
-                    print(f"Loaded {building_type}: {filename}")
+                    # print(f"Loaded {building_type}: {filename}")
                 except pygame.error as e:
                     print(f"Error loading {filename}: {e}")
+            else:
+                print(f"Warning: {filename} not found for {building_type}")
     
     def _load_characters(self):
         """Load character sprites from custom images"""
         
         character_mappings = {
-            "female": "females.png",
-            "females": "females.png", 
-            "girl1": "girl1.png",
-            "male": "male.png",
-            "walking": "walking.png",
-            "professionals": "professionalpeople.png",
-            "npc_idle": "male.png",
-            "npc_walk": "walking.png"
+            # Female characters (characters/females/)
+            "female": ("characters/females", "females.png"),
+            "females": ("characters/females", "females.png"), 
+            "girl1": ("characters/females", "girl1.png"),
+            "female_villager": ("characters/females", "female_villager.png"),
+            
+            # Male characters (characters/males/)
+            "male": ("characters/males", "male.png"),
+            "males": ("characters/males", "male.png"),
+            "male_farmer": ("characters/males", "male_farmer.png"),
+            
+            # NPC characters (characters/npcs/)
+            "elder_villager": ("characters/npcs", "elder_villager.png"),
+            "professionals": ("characters/npcs", "professionalpeople.png"),
+            "professional_people": ("characters/npcs", "professionalpeople.png"),
+            "shop_keepers": ("characters/npcs", "shop_keepers.png"),
+            "shopkeepers": ("characters/npcs", "shop_keepers.png"),
+            "walking": ("characters/npcs", "npc_walking.png"),
+            "npc_walk": ("characters/npcs", "npc_walking.png"),
+            "blacksmith_walking": ("characters/npcs", "blacksmith_walking_left.png"),
+            
+            # Default fallbacks
+            "npc_idle": ("characters/males", "male.png")
         }
         
-        for char_type, filename in character_mappings.items():
-            file_path = os.path.join(self.images_dir, filename)
+        for char_type, (folder, filename) in character_mappings.items():
+            file_path = os.path.join(self.images_dir, folder, filename)
             if os.path.exists(file_path):
                 try:
                     char_img = pygame.image.load(file_path).convert_alpha()
@@ -178,7 +264,7 @@ class CustomAssetManager:
                         scaled_char = pygame.transform.scale(char_img, (24, 32))
                         self.sprites[char_type] = scaled_char
                     
-                    print(f"Loaded character: {filename}")
+                    # print(f"Loaded character: {filename}")
                 except pygame.error as e:
                     print(f"Error loading {filename}: {e}")
         
@@ -193,11 +279,16 @@ class CustomAssetManager:
         
         # Create character mappings for our NPCs
         character_assignments = {
-            "alice": "female",
-            "bob": "male", 
-            "charlie": "male",
+            "alice": "female_villager",
+            "bob": "elder_villager", 
+            "charlie": "male_farmer",
             "diana": "girl1",
-            "player": "walking"
+            "player": "npc_walking",
+            
+            # Wealthy family members
+            "steve": "professionals",  # Wealthy businessman
+            "kailey": "girl1",  # 11-year-old girl
+            "louie": "male"  # 5-year-old boy (use smaller male sprite)
         }
         
         for npc_name, char_type in character_assignments.items():
@@ -237,25 +328,43 @@ class CustomAssetManager:
         """Load UI elements and create icons"""
         
         ui_mappings = {
-            "menu": "menu.png",
-            "settings": "settings.png", 
-            "skills": "skills.png",
-            "tools": "tools.png"
+            # UI panels (ui/panels/)
+            "ui_panel": ("ui/panels", "ui_panel.png"),
+            "ui_button": ("ui/panels", "ui_button.png"), 
+            "ui_window": ("ui/panels", "ui_window.png"),
+            
+            # Need icons (ui/icons/)
+            "icon_hunger": ("ui/icons", "icon_hunger.png"),
+            "icon_sleep": ("ui/icons", "icon_sleep.png"),
+            "icon_fun": ("ui/icons", "icon_fun.png"),
+            
+            # Resource and tool images (nature/environment/)
+            "tools_gems": ("nature/environment", "tools_gems.png"),
+            "resources": ("nature/environment", "resources.png"),
+            
+            # Legacy mappings - look in multiple locations
+            "menu": ("ui/panels", "menu.png"),
+            "settings": ("ui/panels", "settings.png"), 
+            "skills": ("ui/panels", "skills.png"),
+            "tools": ("nature/environment", "tools_gems.png")
         }
         
-        for ui_type, filename in ui_mappings.items():
-            file_path = os.path.join(self.images_dir, filename)
+        for ui_type, (folder, filename) in ui_mappings.items():
+            file_path = os.path.join(self.images_dir, folder, filename)
             if os.path.exists(file_path):
                 try:
                     ui_img = pygame.image.load(file_path).convert_alpha()
                     scaled_ui = pygame.transform.scale(ui_img, (32, 32))
                     self.sprites[ui_type] = scaled_ui
-                    print(f"Loaded UI element: {filename}")
+                    # print(f"Loaded UI element: {filename}")
                 except pygame.error as e:
                     print(f"Error loading {filename}: {e}")
         
         # Create need icons from tools or skills images
         self._create_need_icons()
+        
+        # Load furniture sprites
+        self._load_furniture_sprites()
     
     def _create_need_icons(self):
         """Create need icons from available assets or fallback"""
@@ -340,6 +449,86 @@ class CustomAssetManager:
         # Create UI assets
         self._create_ui_assets()
     
+    def _load_scene_backgrounds(self):
+        """Load large scene background images"""
+        scene_mappings = {
+            "village_scene": ("nature/environment", "village_scene.png"),
+            "village_square": ("nature/environment", "village_square.png"), 
+            "farm_field": ("nature/environment", "farm_field.png"),
+            "farm_path": ("nature/environment", "farm_path.png"),
+            "farmhouse_interior": ("buildings/houses", "farmhouse_interior.png")
+        }
+        
+        for scene_name, path_info in scene_mappings.items():
+            folder, filename = path_info
+            file_path = os.path.join(self.images_dir, folder, filename)
+            if os.path.exists(file_path):
+                try:
+                    scene_img = pygame.image.load(file_path).convert_alpha()
+                    # Store at original size for backgrounds
+                    self.sprites[scene_name] = scene_img
+                    # print(f"Loaded scene: {scene_name} from {filename}")
+                except pygame.error as e:
+                    print(f"Error loading scene {filename}: {e}")
+    
+    def _load_decorative_elements(self):
+        """Load decorative elements like trees and nature sprites"""
+        
+        # Load tree sprites
+        tree_files = ["tree_1.png", "tree_2.png", "tree_3.png", "tree_4.png", "tree_5.png"]
+        for i, tree_file in enumerate(tree_files):
+            tree_path = os.path.join(self.images_dir, "nature", "trees", tree_file)
+            if os.path.exists(tree_path):
+                try:
+                    tree_img = pygame.image.load(tree_path).convert_alpha()
+                    # Scale trees appropriately
+                    tree_scaled = pygame.transform.scale(tree_img, (48, 64))
+                    self.sprites[f"tree_{i+1}"] = tree_scaled
+                    
+                    # Also store as generic "tree" if it's the first one
+                    if i == 0:
+                        self.sprites["tree"] = tree_scaled
+                    
+                    # print(f"Loaded tree: tree_{i+1}")
+                except pygame.error as e:
+                    print(f"Error loading {tree_file}: {e}")
+        
+        # Load UI elements with new naming
+        ui_element_mappings = {
+            "ui_button": "ui_button.png",
+            "ui_panel_new": "ui_panel.png",
+            "ui_window": "ui_window.png"
+        }
+        
+        for ui_name, filename in ui_element_mappings.items():
+            file_path = os.path.join(self.images_dir, "ui", "panels", filename)
+            if os.path.exists(file_path):
+                try:
+                    ui_img = pygame.image.load(file_path).convert_alpha()
+                    self.sprites[ui_name] = ui_img
+                    # print(f"Loaded UI element: {ui_name}")
+                except pygame.error as e:
+                    print(f"Error loading {filename}: {e}")
+        
+        # Load specific need icons
+        icon_mappings = {
+            "icon_hunger": "icon_hunger.png",
+            "icon_sleep": "icon_sleep.png", 
+            "icon_fun": "icon_fun.png"
+        }
+        
+        for icon_name, filename in icon_mappings.items():
+            file_path = os.path.join(self.images_dir, "ui", "icons", filename)
+            if os.path.exists(file_path):
+                try:
+                    icon_img = pygame.image.load(file_path).convert_alpha()
+                    # Scale to appropriate icon size
+                    icon_scaled = pygame.transform.scale(icon_img, (16, 16))
+                    self.icons[icon_name.replace("icon_", "")] = icon_scaled
+                    # print(f"Loaded icon: {icon_name}")
+                except pygame.error as e:
+                    print(f"Error loading {filename}: {e}")
+    
     def _create_path_tiles_from_fences(self):
         """Create path tiles from the fence tileset"""
         if "fences" not in self.tilesets:
@@ -365,20 +554,25 @@ class CustomAssetManager:
     def _create_ui_assets(self):
         """Create UI assets like panels, progress bars, and speech bubbles"""
         
-        # Glass-like UI panel
-        panel_width, panel_height = 200, 100
-        ui_panel = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
-        
-        # Glass effect
-        base_color = (20, 30, 40, 180)
-        border_color = (100, 150, 200, 200)
-        highlight_color = (255, 255, 255, 30)
-        
-        pygame.draw.rect(ui_panel, base_color, (0, 0, panel_width, panel_height), border_radius=10)
-        pygame.draw.rect(ui_panel, highlight_color, (2, 2, panel_width-4, panel_height//4), border_radius=8)
-        pygame.draw.rect(ui_panel, border_color, (0, 0, panel_width, panel_height), 2, border_radius=10)
-        
-        self.sprites["ui_panel"] = ui_panel
+        # Use new UI panel if available, otherwise create one
+        if "ui_panel_new" not in self.sprites:
+            # Glass-like UI panel
+            panel_width, panel_height = 200, 100
+            ui_panel = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+            
+            # Glass effect
+            base_color = (20, 30, 40, 180)
+            border_color = (100, 150, 200, 200)
+            highlight_color = (255, 255, 255, 30)
+            
+            pygame.draw.rect(ui_panel, base_color, (0, 0, panel_width, panel_height), border_radius=10)
+            pygame.draw.rect(ui_panel, highlight_color, (2, 2, panel_width-4, panel_height//4), border_radius=8)
+            pygame.draw.rect(ui_panel, border_color, (0, 0, panel_width, panel_height), 2, border_radius=10)
+            
+            self.sprites["ui_panel"] = ui_panel
+        else:
+            # Use the loaded UI panel
+            self.sprites["ui_panel"] = self.sprites["ui_panel_new"]
         
         # Create progress bar components
         self._create_progress_bars()
@@ -437,9 +631,9 @@ class CustomAssetManager:
     
     def _create_need_icons_from_images(self):
         """Create need icons from available character or building images"""
-        if "professionalpeople.png" in [f for f in os.listdir(self.images_dir) if f.endswith('.png')]:
+        prof_path = os.path.join(self.images_dir, "characters", "npcs", "professionalpeople.png")
+        if os.path.exists(prof_path):
             # Try to extract icons from professional people image
-            prof_path = os.path.join(self.images_dir, "professionalpeople.png")
             try:
                 prof_img = pygame.image.load(prof_path).convert_alpha()
                 icon_size = 16
@@ -500,6 +694,33 @@ class CustomAssetManager:
         pygame.draw.circle(portrait, (100, 150, 200), (12, 12), 10)
         return portrait
     
+    def get_scene_background(self, scene_name: str) -> Optional[pygame.Surface]:
+        """Get a scene background by name"""
+        return self.sprites.get(scene_name)
+    
+    def get_random_tree(self) -> pygame.Surface:
+        """Get a random tree sprite from available tree types"""
+        import random
+        
+        # Try to get from the new tree sprites first
+        available_trees = []
+        for i in range(1, 5):  # tree_1 through tree_4
+            tree_name = f"tree_{i}"
+            if tree_name in self.sprites:
+                available_trees.append(tree_name)
+        
+        if available_trees:
+            tree_name = random.choice(available_trees)
+            return self.sprites[tree_name]
+        elif "tree" in self.sprites:
+            return self.sprites["tree"]
+        else:
+            # Fallback tree
+            tree = pygame.Surface((32, 48), pygame.SRCALPHA)
+            pygame.draw.rect(tree, (101, 67, 33), (12, 30, 8, 18))  # Trunk
+            pygame.draw.circle(tree, (34, 139, 34), (16, 20), 12)   # Foliage
+            return tree
+    
     def get_scaled_sprite(self, name: str, size: tuple) -> Optional[pygame.Surface]:
         """Get a scaled version of a sprite with caching for performance"""
         cache_key = f"{name}_{size[0]}x{size[1]}"
@@ -536,7 +757,7 @@ class CustomAssetManager:
                 if sprite_name in self.sprites:
                     self.get_scaled_sprite(sprite_name, size)
         
-        print(f"Preloaded {len(self._scaled_cache)} scaled sprites for performance")
+        # print(f"Preloaded {len(self._scaled_cache)} scaled sprites for performance")
     
     def list_loaded_assets(self):
         """Print all loaded assets for debugging"""
@@ -546,3 +767,89 @@ class CustomAssetManager:
         print(f"Icons ({len(self.icons)}): {list(self.icons.keys())}")
         print(f"Tilesets ({len(self.tilesets)}): {list(self.tilesets.keys())}")
         print("===========================\n")
+    
+    def _load_furniture_sprites(self):
+        """Load furniture and interior decoration sprites"""
+        
+        furniture_mappings = {
+            # Furniture sprite sheets
+            "bathroom_furniture": ("furniture/bathroom", "bathroom furniture sprites.png"),
+            "bedroom_furniture": ("furniture/bedroom", "bedroom furniture sprites.png"), 
+            "interior_furniture": ("furniture", "interior furniture sprites.png"),
+            "living_room_furniture": ("furniture/living_room", "living room furniture sprites.png"),
+            
+            # Interior rooms
+            "bathroom": ("furniture/bathroom", "bathroom.png"),
+            "kitchen": ("furniture/kitchen", "kicten.png"),  # Note: filename has typo in your assets
+            "living_room": ("furniture/living_room", "livvingroom.png"),  # Note: filename has typo in your assets
+            
+            # Environment decorations
+            "environment_decorations": ("nature/environment", "environment_decorations.png"),
+            "fences_walls_bridges": ("nature/environment", "fences, walls, bridges.png")
+        }
+        
+        for furniture_type, path_info in furniture_mappings.items():
+            if isinstance(path_info, tuple):
+                folder, filename = path_info
+                file_path = os.path.join(self.images_dir, folder, filename)
+            else:
+                # Handle old single filename format
+                filename = path_info
+                file_path = os.path.join(self.images_dir, filename)
+            if os.path.exists(file_path):
+                try:
+                    furniture_img = pygame.image.load(file_path).convert_alpha()
+                    
+                    # Store the full spritesheet
+                    self.tilesets[furniture_type] = furniture_img
+                    
+                    # Extract individual furniture pieces if it's a spritesheet
+                    if "furniture" in furniture_type and furniture_img.get_width() > 64:
+                        self._extract_furniture_pieces(furniture_img, furniture_type)
+                    else:
+                        # Single furniture piece or room
+                        self.sprites[furniture_type] = furniture_img
+                    
+                    print(f"Loaded furniture: {furniture_type}")
+                except pygame.error as e:
+                    print(f"Error loading {filename}: {e}")
+    
+    def _extract_furniture_pieces(self, spritesheet, furniture_type):
+        """Extract individual furniture pieces from spritesheet"""
+        piece_size = 32  # Assuming 32x32 furniture pieces
+        sheet_width = spritesheet.get_width()
+        sheet_height = spritesheet.get_height()
+        
+        pieces_per_row = sheet_width // piece_size
+        pieces_per_col = sheet_height // piece_size
+        
+        piece_count = 0
+        for row in range(pieces_per_col):
+            for col in range(pieces_per_row):
+                if piece_count >= 16:  # Limit to 16 pieces per sheet
+                    break
+                    
+                rect = pygame.Rect(col * piece_size, row * piece_size, piece_size, piece_size)
+                piece_surface = pygame.Surface((piece_size, piece_size), pygame.SRCALPHA)
+                piece_surface.blit(spritesheet, (0, 0), rect)
+                
+                # Store individual piece
+                piece_name = f"{furniture_type}_piece_{piece_count}"
+                self.sprites[piece_name] = piece_surface
+                piece_count += 1
+    
+    def _print_asset_summary(self):
+        """Print a summary of loaded assets"""
+        buildings = [k for k in self.sprites.keys() if any(t in k for t in ['house', 'shop', 'hospital', 'school', 'mansion', 'restaurant', 'office', 'farm', 'blacksmith', 'hotel', 'town'])]
+        characters = [k for k in self.sprites.keys() if any(t in k for t in ['alice', 'bob', 'charlie', 'diana', 'steve', 'kailey', 'louie', 'male', 'female', 'villager', 'farmer'])]
+        furniture = [k for k in self.sprites.keys() if 'furniture' in k or 'bathroom' in k or 'kitchen' in k or 'living' in k]
+        ui_elements = [k for k in self.sprites.keys() if 'ui_' in k or 'icon_' in k]
+        
+        print(f"\n📊 ASSET SUMMARY:")
+        print(f"🏢 Buildings: {len(buildings)} ({', '.join(buildings[:5])}{'...' if len(buildings) > 5 else ''})")
+        print(f"👥 Characters: {len(characters)} ({', '.join(characters[:5])}{'...' if len(characters) > 5 else ''})")
+        print(f"🪑 Furniture: {len(furniture)} ({', '.join(furniture[:3])}{'...' if len(furniture) > 3 else ''})")
+        print(f"🎮 UI Elements: {len(ui_elements)} ({', '.join(ui_elements[:3])}{'...' if len(ui_elements) > 3 else ''})")
+        print(f"📦 Total Sprites: {len(self.sprites)}")
+        print(f"🖼️ Total Tilesets: {len(self.tilesets)}")
+        print("="*50)

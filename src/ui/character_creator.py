@@ -1,7 +1,9 @@
 import pygame
+import os
 from typing import Dict, Callable
 from src.core.constants import *
 from src.ui.menu import Button
+from src.graphics.custom_asset_manager import CustomAssetManager
 
 class Slider:
     def __init__(self, x, y, width, height, min_val, max_val, initial_val, label):
@@ -83,6 +85,90 @@ class ColorPicker:
             else:
                 pygame.draw.rect(screen, (100, 100, 100), rect, 2)
 
+class SkinSelector:
+    """Allows player to select from available character skins/sprites"""
+    
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.assets = CustomAssetManager()
+        
+        # Available player skins with display names
+        self.available_skins = [
+            ("male", "Male Villager"),
+            ("male_farmer", "Male Farmer"),
+            ("female", "Female Villager"),
+            ("female_villager", "Female Adventurer"),
+            ("girl1", "Young Woman"),
+        ]
+        
+        # Load skin sprites
+        self.skin_sprites = {}
+        for skin_id, display_name in self.available_skins:
+            sprite = self.assets.get_character_sprite(skin_id)
+            if sprite:
+                # Scale sprite for preview
+                preview_sprite = pygame.transform.scale(sprite, (48, 64))
+                self.skin_sprites[skin_id] = {
+                    "sprite": preview_sprite,
+                    "display_name": display_name
+                }
+        
+        # Default to first available skin
+        self.selected_skin = self.available_skins[0][0] if self.available_skins else "male"
+        
+        # Create clickable rectangles for each skin
+        self.skin_rects = []
+        for i, (skin_id, _) in enumerate(self.available_skins):
+            col = i % 3
+            row = i // 3
+            rect = pygame.Rect(x + col * 100, y + row * 90, 80, 80)
+            self.skin_rects.append((rect, skin_id))
+    
+    def handle_event(self, event):
+        """Handle mouse clicks on skin options"""
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for rect, skin_id in self.skin_rects:
+                if rect.collidepoint(event.pos):
+                    self.selected_skin = skin_id
+                    return True
+        return False
+    
+    def draw(self, screen):
+        """Draw the skin selector UI"""
+        font = pygame.font.Font(None, 24)
+        label_text = font.render("Choose Your Character:", True, WHITE)
+        screen.blit(label_text, (self.x, self.y - 30))
+        
+        # Draw each skin option
+        for rect, skin_id in self.skin_rects:
+            # Draw background
+            if skin_id == self.selected_skin:
+                pygame.draw.rect(screen, (100, 150, 200), rect)
+                pygame.draw.rect(screen, WHITE, rect, 3)
+            else:
+                pygame.draw.rect(screen, (60, 60, 60), rect)
+                pygame.draw.rect(screen, (100, 100, 100), rect, 2)
+            
+            # Draw sprite preview
+            if skin_id in self.skin_sprites:
+                sprite_data = self.skin_sprites[skin_id]
+                sprite_rect = sprite_data["sprite"].get_rect()
+                sprite_rect.center = rect.center
+                screen.blit(sprite_data["sprite"], sprite_rect)
+                
+                # Draw name below sprite
+                name_font = pygame.font.Font(None, 16)
+                name_text = name_font.render(sprite_data["display_name"], True, WHITE)
+                name_rect = name_text.get_rect()
+                name_rect.centerx = rect.centerx
+                name_rect.top = rect.bottom + 2
+                screen.blit(name_text, name_rect)
+    
+    def get_selected_skin(self):
+        """Return the currently selected skin ID"""
+        return self.selected_skin
+
 class CharacterCreator:
     def __init__(self, screen):
         self.screen = screen
@@ -94,44 +180,53 @@ class CharacterCreator:
         # Character name input
         self.name_input = ""
         self.name_active = False
-        self.name_rect = pygame.Rect(center_x - 150, 150, 300, 40)
+        self.name_rect = pygame.Rect(center_x - 150, 120, 300, 40)
         
-        # Personality sliders
+        # Skin selector - positioned at the top
+        self.skin_selector = SkinSelector(center_x - 150, 200)
+        
+        # Personality sliders - adjusted positioning to accommodate skin selector
+        slider_start_y = 400
         self.personality_sliders = {
-            "friendliness": Slider(center_x - 200, 220, 200, 20, 0.0, 1.0, 0.5, "Friendliness"),
-            "energy": Slider(center_x + 20, 220, 200, 20, 0.0, 1.0, 0.5, "Energy"),
-            "creativity": Slider(center_x - 200, 270, 200, 20, 0.0, 1.0, 0.5, "Creativity"),
-            "organization": Slider(center_x + 20, 270, 200, 20, 0.0, 1.0, 0.5, "Organization"),
-            "confidence": Slider(center_x - 200, 320, 200, 20, 0.0, 1.0, 0.5, "Confidence"),
-            "empathy": Slider(center_x + 20, 320, 200, 20, 0.0, 1.0, 0.5, "Empathy"),
-            "humor": Slider(center_x - 200, 370, 200, 20, 0.0, 1.0, 0.5, "Humor"),
-            "curiosity": Slider(center_x + 20, 370, 200, 20, 0.0, 1.0, 0.5, "Curiosity"),
-            "patience": Slider(center_x - 200, 420, 200, 20, 0.0, 1.0, 0.5, "Patience"),
-            "ambition": Slider(center_x + 20, 420, 200, 20, 0.0, 1.0, 0.5, "Ambition"),
+            "friendliness": Slider(center_x - 200, slider_start_y, 200, 20, 0.0, 1.0, 0.5, "Friendliness"),
+            "energy": Slider(center_x + 20, slider_start_y, 200, 20, 0.0, 1.0, 0.5, "Energy"),
+            "creativity": Slider(center_x - 200, slider_start_y + 50, 200, 20, 0.0, 1.0, 0.5, "Creativity"),
+            "organization": Slider(center_x + 20, slider_start_y + 50, 200, 20, 0.0, 1.0, 0.5, "Organization"),
+            "confidence": Slider(center_x - 200, slider_start_y + 100, 200, 20, 0.0, 1.0, 0.5, "Confidence"),
+            "empathy": Slider(center_x + 20, slider_start_y + 100, 200, 20, 0.0, 1.0, 0.5, "Empathy"),
+            "humor": Slider(center_x - 200, slider_start_y + 150, 200, 20, 0.0, 1.0, 0.5, "Humor"),
+            "curiosity": Slider(center_x + 20, slider_start_y + 150, 200, 20, 0.0, 1.0, 0.5, "Curiosity"),
+            "patience": Slider(center_x - 200, slider_start_y + 200, 200, 20, 0.0, 1.0, 0.5, "Patience"),
+            "ambition": Slider(center_x + 20, slider_start_y + 200, 200, 20, 0.0, 1.0, 0.5, "Ambition"),
         }
         
-        # Color picker
+        # Color picker - moved down
         colors = [
             BLUE, RED, (100, 255, 100), (255, 255, 100), 
             (255, 100, 255), (100, 255, 255), (255, 150, 100), (150, 100, 255)
         ]
-        self.color_picker = ColorPicker(center_x - 140, 480, colors, BLUE)
+        color_picker_y = SCREEN_HEIGHT - 240  # Position color picker appropriately
+        self.color_picker = ColorPicker(center_x - 140, color_picker_y, colors, BLUE)
         
-        # Preset buttons
+        # Preset buttons - adjusted for screen height
+        preset_y = SCREEN_HEIGHT - 180  # Position preset buttons above control buttons
         self.preset_buttons = [
-            Button(center_x - 250, 540, 100, 35, "Friendly", self._preset_friendly, 18),
-            Button(center_x - 130, 540, 100, 35, "Leader", self._preset_leader, 18),
-            Button(center_x - 10, 540, 100, 35, "Creative", self._preset_creative, 18),
-            Button(center_x + 110, 540, 100, 35, "Random", self._preset_random, 18),
+            Button(center_x - 250, preset_y, 100, 30, "Friendly", self._preset_friendly, 16),
+            Button(center_x - 130, preset_y, 100, 30, "Leader", self._preset_leader, 16),
+            Button(center_x - 10, preset_y, 100, 30, "Creative", self._preset_creative, 16),
+            Button(center_x + 110, preset_y, 100, 30, "Random", self._preset_random, 16),
         ]
         
-        # Control buttons
-        self.create_button = Button(center_x - 100, 600, 200, 50, "Create Character", self._create_character)
-        self.back_button = Button(50, 650, 100, 40, "Back", self._back)
+        # Control buttons - adjusted for screen height
+        button_y = SCREEN_HEIGHT - 120  # Position buttons 120px from bottom
+        self.create_button = Button(center_x - 150, button_y, 140, 40, "Create Character", self._create_character)
+        self.advanced_button = Button(center_x + 20, button_y, 130, 40, "Advanced Settings", self._open_advanced)
+        self.back_button = Button(50, button_y, 80, 40, "Back", self._back)
         
         # Callbacks
         self.on_character_created = None
         self.on_back = None
+        self.on_advanced_settings = None
         
         self.character_data = None
     
@@ -169,7 +264,8 @@ class CharacterCreator:
         self.character_data = {
             "name": self.name_input.strip(),
             "personality": personality_traits,
-            "color": self.color_picker.selected_color
+            "color": self.color_picker.selected_color,
+            "skin": self.skin_selector.get_selected_skin()
         }
         
         if self.on_character_created:
@@ -178,6 +274,10 @@ class CharacterCreator:
     def _back(self):
         if self.on_back:
             self.on_back()
+    
+    def _open_advanced(self):
+        if self.on_advanced_settings:
+            self.on_advanced_settings()
     
     def handle_event(self, event):
         # Handle name input
@@ -192,6 +292,10 @@ class CharacterCreator:
             else:
                 if len(self.name_input) < 20 and event.unicode.isprintable():
                     self.name_input += event.unicode
+            return True
+        
+        # Handle skin selector
+        if self.skin_selector.handle_event(event):
             return True
         
         # Handle sliders
@@ -209,6 +313,9 @@ class CharacterCreator:
                 return True
         
         if self.create_button.handle_event(event):
+            return True
+        
+        if self.advanced_button.handle_event(event):
             return True
         
         if self.back_button.handle_event(event):
@@ -240,9 +347,12 @@ class CharacterCreator:
         name_text_rect.x = self.name_rect.x + 10
         self.screen.blit(name_surface, name_text_rect)
         
+        # Draw skin selector
+        self.skin_selector.draw(self.screen)
+        
         # Personality section title
         personality_title = self.font_label.render("Personality Traits:", True, (255, 255, 100))
-        self.screen.blit(personality_title, (SCREEN_WIDTH // 2 - 200, 195))
+        self.screen.blit(personality_title, (SCREEN_WIDTH // 2 - 200, 370))
         
         # Draw sliders
         for slider in self.personality_sliders.values():
@@ -253,13 +363,14 @@ class CharacterCreator:
         
         # Preset section title
         preset_title = self.font_label.render("Quick Presets:", True, (255, 255, 100))
-        self.screen.blit(preset_title, (SCREEN_WIDTH // 2 - 250, 515))
+        self.screen.blit(preset_title, (SCREEN_WIDTH // 2 - 250, 695))
         
         # Draw buttons
         for button in self.preset_buttons:
             button.draw(self.screen)
         
         self.create_button.draw(self.screen)
+        self.advanced_button.draw(self.screen)
         self.back_button.draw(self.screen)
         
         # Character preview

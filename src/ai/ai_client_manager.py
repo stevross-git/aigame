@@ -54,6 +54,15 @@ class AIClientManager:
         Create the appropriate AI client based on settings.
         Returns the client instance or None if creation fails.
         """
+        # Check if AI is completely disabled
+        if (self.settings_data.get("disable_ollama", False) or
+            self.settings_data.get("disable_ai_completely", False) or
+            self.settings_data.get("disable_npc_ai", False) or
+            self.settings_data.get("disable_all_ai_systems", False) or
+            self.settings_data.get("ai_provider") == "Disabled"):
+            print("🚫 AI completely disabled by settings - returning None")
+            return None
+        
         ai_provider = self.settings_data.get("ai_provider", "Ollama")
         
         print(f"Creating AI client for provider: {ai_provider}")
@@ -93,7 +102,7 @@ class AIClientManager:
                 
             def make_decision(self, npc_data: Dict, context: Dict):
                 from src.ai.ollama_client import OllamaClient
-                ollama_client = OllamaClient()
+                ollama_client = OllamaClient(disable_ollama=True)  # Disable Ollama for prompt building only
                 prompt = ollama_client._build_prompt(npc_data, context)
                 
                 # Use OpenAI first, then Claude as fallback (skip Ollama)
@@ -119,7 +128,7 @@ class AIClientManager:
                 
             def make_decision(self, npc_data: Dict, context: Dict):
                 from src.ai.ollama_client import OllamaClient
-                ollama_client = OllamaClient()
+                ollama_client = OllamaClient(disable_ollama=True)  # Disable Ollama for prompt building only
                 prompt = ollama_client._build_prompt(npc_data, context)
                 
                 # Use Claude first, then OpenAI as fallback (skip Ollama)
@@ -148,7 +157,8 @@ class AIClientManager:
     def _create_ollama_client(self):
         """Create standard Ollama client with fallback"""
         model_name = self.settings_data.get("ollama_model", "llama2")
-        return OllamaClient(model_name)
+        disable_ollama = self.settings_data.get("disable_ollama", False)
+        return OllamaClient(model_name, disable_ollama=disable_ollama)
     
     def get_provider_status(self) -> Dict[str, str]:
         """Get status of current AI provider"""

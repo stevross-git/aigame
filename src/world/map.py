@@ -1,6 +1,6 @@
 import pygame
 import random
-from src.core.constants import *
+import src.core.constants as constants
 
 class Map:
     def __init__(self, width, height):
@@ -32,12 +32,12 @@ class Map:
         visible_rect = pygame.Rect(-camera.camera.x, -camera.camera.y, 
                                   camera.width, camera.height)
         
-        for y in range(0, self.height, TILE_SIZE):
-            for x in range(0, self.width, TILE_SIZE):
-                tile_rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
+        for y in range(0, self.height, constants.TILE_SIZE):
+            for x in range(0, self.width, constants.TILE_SIZE):
+                tile_rect = pygame.Rect(x, y, constants.TILE_SIZE, constants.TILE_SIZE)
                 if visible_rect.colliderect(tile_rect):
                     screen_rect = camera.apply_rect(tile_rect)
-                    pygame.draw.rect(screen, GREEN, screen_rect)
+                    pygame.draw.rect(screen, constants.GREEN, screen_rect)
                     pygame.draw.rect(screen, (40, 140, 40), screen_rect, 1)
         
         for building in self.buildings:

@@ -73,6 +73,10 @@ class NPC(pygame.sprite.Sprite):
         self.player_interaction_context = None
         self.chat_interface = None  # Will be set by game class
         
+        # Async AI state
+        self.pending_ai_request = False
+        self.last_ai_request_time = 0
+        
         try:
             ai_manager = AIClientManager()
             self.ai_client = ai_manager.create_ai_client()
@@ -82,9 +86,13 @@ class NPC(pygame.sprite.Sprite):
             print(f"Failed to initialize AI for {name}: {e}")
             self.ai_client = None
     
-    def update(self, dt, other_npcs, active_events=None):
-        self._update_needs(dt)
-        self._update_ai_behavior(dt, other_npcs, active_events)
+    def update(self, dt, other_npcs, active_events=None, ai_paused=False):
+        # Always update basic needs (they continue during interactions)
+        if not ai_paused:
+            self._update_needs(dt)
+            self._update_ai_behavior(dt, other_npcs, active_events)
+        
+        # Always update movement and animation (but they may be stationary)
         self._move(dt)
         self._update_animation(dt)
         
@@ -97,13 +105,27 @@ class NPC(pygame.sprite.Sprite):
                 self.current_dialogue = None
     
     def _update_needs(self, dt):
-        self.needs["hunger"] -= dt * 0.05
-        self.needs["sleep"] -= dt * 0.03
-        self.needs["social"] -= dt * 0.04
-        self.needs["fun"] -= dt * 0.02
+        # Store old needs to detect significant changes
+        old_needs = self.needs.copy()
+        
+        self.needs["hunger"] -= dt * 0.01  # Slower hunger decay
+        self.needs["sleep"] -= dt * 0.008  # Slower sleep decay
+        self.needs["social"] -= dt * 0.012 # Slower social decay
+        self.needs["fun"] -= dt * 0.006    # Slower fun decay
         
         for need in self.needs:
             self.needs[need] = max(0, min(1, self.needs[need]))
+        
+        # Check for significant need changes and invalidate cache if necessary
+        if self.ai_client and hasattr(self.ai_client, 'invalidate_npc_cache'):
+            significant_changes = {}
+            for need, new_value in self.needs.items():
+                old_value = old_needs.get(need, new_value)
+                if abs(new_value - old_value) > 0.15:  # 15% change threshold
+                    significant_changes[f'need_{need}'] = new_value
+            
+            if significant_changes:
+                self.ai_client.invalidate_npc_cache(self.name, significant_changes)
     
     def _update_ai_behavior(self, dt, other_npcs, active_events=None):
         self.ai_decision_cooldown -= dt
@@ -111,35 +133,64 @@ class NPC(pygame.sprite.Sprite):
         if active_events:
             self._react_to_events(active_events)
         
-        if self.ai_decision_cooldown <= 0 and self.ai_client:
+        if self.ai_decision_cooldown <= 0 and self.ai_client and not self.pending_ai_request:
             context = self._build_context(other_npcs, active_events)
             npc_data = self._get_npc_data()
             
             try:
-                ai_response = self.ai_client.make_decision(npc_data, context)
-                self._execute_ai_decision(ai_response, other_npcs, active_events)
-                
-                # Send response to AI response box
-                if self.ai_response_box:
-                    self.ai_response_box.add_response(
-                        self.name, 
-                        ai_response.action, 
-                        ai_response.reasoning or "No reasoning provided",
-                        ai_response.dialogue
-                    )
-                
-                # Handle chat interface responses
+                # Use async AI requests to prevent lag, but fall back to sync for critical interactions
                 if (self.player_interaction_context and 
-                    self.player_interaction_context.get("type") == "direct_chat" and
-                    ai_response.dialogue and self.chat_interface):
-                    self.chat_interface.handle_npc_response(self, ai_response.dialogue)
+                    self.player_interaction_context.get("type") == "direct_chat"):
+                    # For direct chat, use async to prevent UI lag
+                    self.pending_ai_request = True
+                    self.ai_client.make_decision_async(npc_data, context, self._handle_async_ai_response)
+                elif hasattr(self.ai_client, 'make_decision_async'):
+                    # For regular behavior, also use async but with lower priority
+                    self.pending_ai_request = True
+                    self.ai_client.make_decision_async(npc_data, context, self._handle_async_ai_response)
+                else:
+                    # Fallback to synchronous if async not available
+                    ai_response = self.ai_client.make_decision(npc_data, context)
+                    self._process_ai_response(ai_response, other_npcs, active_events)
                 
-                self.ai_decision_cooldown = random.uniform(2, 5)
+                self.ai_decision_cooldown = random.uniform(10, 20)
             except Exception as e:
                 print(f"AI decision error for {self.name}: {e}")
                 self._fallback_behavior(dt, other_npcs)
         else:
             self._fallback_behavior(dt, other_npcs)
+    
+    def _handle_async_ai_response(self, ai_response):
+        """Handle async AI response"""
+        self.pending_ai_request = False
+        self._process_ai_response(ai_response, [], [])
+    
+    def _process_ai_response(self, ai_response, other_npcs, active_events):
+        """Process AI response (both sync and async)"""
+        self._execute_ai_decision(ai_response, other_npcs, active_events)
+        
+        # Send response to AI response box
+        if self.ai_response_box:
+            self.ai_response_box.add_response(
+                self.name, 
+                ai_response.action, 
+                ai_response.reasoning or "No reasoning provided",
+                ai_response.dialogue
+            )
+        
+        # Handle chat interface responses
+        if (self.player_interaction_context and 
+            self.player_interaction_context.get("type") == "direct_chat" and
+            ai_response.dialogue and self.chat_interface):
+            self.chat_interface.handle_npc_response(self, ai_response.dialogue)
+        
+        # Check for emotion changes and invalidate cache if needed
+        if ai_response.emotion and ai_response.emotion != self.emotion:
+            old_emotion = self.emotion
+            self.emotion = ai_response.emotion
+            
+            if self.ai_client and hasattr(self.ai_client, 'invalidate_npc_cache'):
+                self.ai_client.invalidate_npc_cache(self.name, {'emotion': self.emotion})
     
     def _react_to_events(self, active_events):
         for event in active_events:
@@ -155,7 +206,7 @@ class NPC(pygame.sprite.Sprite):
             if self.wander_timer <= 0:
                 self._set_random_target()
                 self.state = "wandering"
-                self.wander_timer = random.uniform(3, 8)
+                self.wander_timer = random.uniform(15, 30)
         
         elif self.state == "wandering":
             if self.target_pos and self._reached_target():
@@ -318,7 +369,7 @@ class NPC(pygame.sprite.Sprite):
                 self._interact_with(target_npc)
                 if ai_response.dialogue:
                     self.current_dialogue = ai_response.dialogue
-                    self.dialogue_timer = 3.0
+                    self.dialogue_timer = 8.0
         
         elif ai_response.action == "move_to":
             if ai_response.target and "," in ai_response.target:
@@ -507,7 +558,7 @@ class NPC(pygame.sprite.Sprite):
     def say(self, text):
         """Make NPC say something"""
         self.current_dialogue = text
-        self.dialogue_timer = 3.0  # Show for 3 seconds
+        self.dialogue_timer = 8.0  # Show for 8 seconds
     
     def _adjust_relationship(self, other, change):
         """Adjust relationship with another character"""

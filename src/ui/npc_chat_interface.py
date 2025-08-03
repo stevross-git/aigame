@@ -5,6 +5,12 @@ from typing import List, Dict, Optional
 from src.core.constants import *
 from src.graphics.custom_asset_manager import CustomAssetManager
 
+# Import quest types for integration
+try:
+    from src.systems.quest_system import ObjectiveType
+except ImportError:
+    ObjectiveType = None
+
 class ChatMessage:
     """Represents a single chat message"""
     def __init__(self, sender: str, text: str, is_player: bool = False):
@@ -18,8 +24,9 @@ class NPCChatInterface:
     Beautiful chat interface for talking directly with NPCs
     """
     
-    def __init__(self, screen):
+    def __init__(self, screen, quest_system=None):
         self.screen = screen
+        self.quest_system = quest_system
         self.assets = CustomAssetManager()
         
         # Fonts
@@ -67,6 +74,10 @@ class NPCChatInterface:
         self.npc_typing = False
         self.typing_timer = 0.0
         self.typing_dots = 0
+        
+        # Game pause callbacks
+        self.on_pause_game = None
+        self.on_resume_game = None
     
     def show(self, npc):
         """Show chat interface for specific NPC"""
@@ -74,6 +85,10 @@ class NPCChatInterface:
         self.visible = True
         self.input_active = True
         self.target_slide = 1.0
+        
+        # Pause the game during chat
+        if self.on_pause_game:
+            self.on_pause_game()
         
         # Add greeting message if this is first conversation
         if not self.chat_messages or self.chat_messages[-1].sender != npc.name:
@@ -84,6 +99,11 @@ class NPCChatInterface:
         """Hide chat interface"""
         self.target_slide = 0.0
         self.input_active = False
+        
+        # Resume the game when hiding chat
+        if self.on_resume_game:
+            self.on_resume_game()
+        
         # Don't immediately set visible = False, let animation finish
     
     def add_player_message(self, text: str):
@@ -241,7 +261,16 @@ class NPCChatInterface:
                 "curious": (200, 255, 200),
                 "tired": (180, 150, 180)
             }
-            border_color = mood_colors.get(self.current_npc.emotion, self.border_color)
+            # Get emotion from emotional_state if available
+            emotion = None
+            if hasattr(self.current_npc, 'emotional_state') and hasattr(self.current_npc.emotional_state, 'primary_emotion'):
+                emotion = self.current_npc.emotional_state.primary_emotion.value
+            elif hasattr(self.current_npc, 'emotion'):
+                emotion = self.current_npc.emotion
+            else:
+                emotion = 'neutral'
+            
+            border_color = mood_colors.get(emotion, self.border_color)
         
         pygame.draw.rect(window_surface, border_color, 
                         (0, 0, self.chat_width, self.chat_height), 3, border_radius=15)
@@ -274,7 +303,16 @@ class NPCChatInterface:
         self.screen.blit(name_text, name_rect)
         
         # NPC emotion/mood
-        emotion_text = f"Mood: {self.current_npc.emotion.title()}"
+        # Get emotion from emotional_state if available
+        emotion = None
+        if hasattr(self.current_npc, 'emotional_state') and hasattr(self.current_npc.emotional_state, 'primary_emotion'):
+            emotion = self.current_npc.emotional_state.primary_emotion.value
+        elif hasattr(self.current_npc, 'emotion'):
+            emotion = self.current_npc.emotion
+        else:
+            emotion = 'neutral'
+        
+        emotion_text = f"Mood: {emotion.title()}"
         emotion_surface = self.font_small.render(emotion_text, True, (180, 180, 180))
         emotion_rect = emotion_surface.get_rect()
         emotion_rect.x = self.chat_x + (50 if portrait else 15)
@@ -466,11 +504,21 @@ class NPCChatInterface:
         # Show typing indicator
         self.npc_typing = True
         
+        # Update quest objectives for talking to NPC
+        if self.quest_system and ObjectiveType and self.current_npc:
+            try:
+                # Update general NPC talking objectives
+                self.quest_system.update_objective(ObjectiveType.TALK_TO_NPC, "any_npc", 1)
+                # Update specific NPC talking objectives
+                self.quest_system.update_objective(ObjectiveType.TALK_TO_NPC, self.current_npc.name, 1)
+            except Exception as e:
+                print(f"Error updating quest objectives for NPC conversation: {e}")
+        
         # Send message to NPC for AI response
         self._request_npc_response(player_message)
     
     def _request_npc_response(self, player_message: str):
-        """Request AI response from NPC"""
+        """Request AI response from NPC asynchronously"""
         if not self.current_npc:
             return
         
@@ -481,11 +529,60 @@ class NPCChatInterface:
             "chat_history": [msg.text for msg in self.chat_messages[-5:]]  # Last 5 messages
         }
         
-        # The NPC will respond on its next AI update cycle
-        # We'll stop the typing indicator when the response comes
+        # Request async AI response if NPC has AI client
+        if hasattr(self.current_npc, 'ai_client') and self.current_npc.ai_client:
+            # Prepare NPC data for AI request
+            npc_data = {
+                'name': self.current_npc.name,
+                'personality_description': getattr(self.current_npc, 'personality_description', 'A friendly villager'),
+                'needs': getattr(self.current_npc, 'needs', {'hunger': 0.5, 'sleep': 0.5, 'social': 0.5, 'fun': 0.5}),
+                'recent_memories': getattr(self.current_npc, 'recent_memories', []),
+                'relationships': getattr(self.current_npc, 'relationships', {})
+            }
+            
+            # Get emotion from emotional_state if available
+            emotion = None
+            if hasattr(self.current_npc, 'emotional_state') and hasattr(self.current_npc.emotional_state, 'primary_emotion'):
+                emotion = self.current_npc.emotional_state.primary_emotion.value
+            elif hasattr(self.current_npc, 'emotion'):
+                emotion = self.current_npc.emotion
+            else:
+                emotion = 'neutral'
+            
+            # Prepare context
+            context = {
+                'situation': 'chatting with player',
+                'nearby_npcs': [],
+                'emotion': emotion,
+                'active_events': [],
+                'player_message': player_message,
+                'chat_history': [msg.text for msg in self.chat_messages[-5:]]
+            }
+            
+            # Make async AI request
+            self.current_npc.ai_client.make_decision_async(
+                npc_data, 
+                context, 
+                self._handle_ai_response
+            )
+        else:
+            # Fallback: The NPC will respond on its next AI update cycle
+            # We'll stop the typing indicator when the response comes
+            pass
+    
+    def _handle_ai_response(self, ai_response):
+        """Handle async AI response"""
+        self.npc_typing = False
+        
+        # Extract dialogue from AI response
+        if ai_response and ai_response.dialogue:
+            self.add_npc_message(ai_response.dialogue)
+        else:
+            # Fallback response if no dialogue
+            self.add_npc_message("I'm not sure what to say right now.")
     
     def handle_npc_response(self, npc, response_text: str):
-        """Handle when NPC provides a response"""
+        """Handle when NPC provides a response (legacy method)"""
         if npc == self.current_npc and response_text:
             self.npc_typing = False
             self.add_npc_message(response_text)

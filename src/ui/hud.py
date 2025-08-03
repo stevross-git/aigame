@@ -91,8 +91,17 @@ class HUD:
         name_text = self.font_small.render(npc.name, True, WHITE)
         self.screen.blit(name_text, (x, y))
         
-        emotion_color = self._get_emotion_color(npc.emotion)
-        emotion_text = self.font_small.render(f"({npc.emotion})", True, emotion_color)
+        # Get emotion from emotional_state if available
+        emotion = None
+        if hasattr(npc, 'emotional_state') and hasattr(npc.emotional_state, 'primary_emotion'):
+            emotion = npc.emotional_state.primary_emotion.value
+        elif hasattr(npc, 'emotion'):
+            emotion = npc.emotion
+        else:
+            emotion = 'neutral'
+        
+        emotion_color = self._get_emotion_color(emotion)
+        emotion_text = self.font_small.render(f"({emotion})", True, emotion_color)
         self.screen.blit(emotion_text, (x + 60, y))
         
         state_text = self.font_small.render(npc.state, True, (200, 200, 200))

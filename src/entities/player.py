@@ -1,5 +1,5 @@
 import pygame
-from src.core.constants import *
+import src.core.constants as constants
 from src.entities.personality import Personality
 from src.graphics.custom_asset_manager import CustomAssetManager
 
@@ -71,8 +71,8 @@ class Player(pygame.sprite.Sprite):
         self.rect.x += self.velocity.x * dt
         self.rect.y += self.velocity.y * dt
         
-        self.rect.x = max(0, min(self.rect.x, MAP_WIDTH - self.rect.width))
-        self.rect.y = max(0, min(self.rect.y, MAP_HEIGHT - self.rect.height))
+        self.rect.x = max(0, min(self.rect.x, constants.MAP_WIDTH - self.rect.width))
+        self.rect.y = max(0, min(self.rect.y, constants.MAP_HEIGHT - self.rect.height))
         
         # Update dialogue timer
         if self.dialogue_timer > 0:
@@ -311,7 +311,7 @@ class Player(pygame.sprite.Sprite):
     def say(self, text):
         """Make player say something"""
         self.current_dialogue = text
-        self.dialogue_timer = 3.0  # Show for 3 seconds
+        self.dialogue_timer = 8.0  # Show for 8 seconds
     
     def get_nearby_npcs(self, npcs, max_distance=100):
         """Get list of NPCs within interaction range"""

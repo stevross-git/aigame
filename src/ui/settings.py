@@ -2,7 +2,7 @@ import pygame
 import json
 import os
 from typing import Dict, Callable, Any
-from src.core.constants import *
+import src.core.constants as constants
 from src.ui.menu import Button
 from src.ui.character_creator import Slider
 
@@ -50,6 +50,7 @@ class Settings:
             "fps_limit": 60,
             "show_fps": True,
             "camera_smoothing": True,
+            "screen_resolution": "1600x900",
             
             # Audio
             "master_volume": 1.0,
@@ -132,10 +133,10 @@ class SettingsMenu:
             self.tab_buttons.append(button)
         
         # Control buttons
-        self.back_button = Button(50, SCREEN_HEIGHT - 70, 100, 40, "Back", self._back)
-        self.reset_button = Button(170, SCREEN_HEIGHT - 70, 120, 40, "Reset All", self._reset_all)
-        self.api_keys_button = Button(310, SCREEN_HEIGHT - 70, 120, 40, "Manage Keys", self._manage_api_keys)
-        self.apply_button = Button(SCREEN_WIDTH - 200, SCREEN_HEIGHT - 70, 120, 40, "Apply & Save", self._apply_settings)
+        self.back_button = Button(50, constants.SCREEN_HEIGHT - 70, 100, 40, "Back", self._back)
+        self.reset_button = Button(170, constants.SCREEN_HEIGHT - 70, 120, 40, "Reset All", self._reset_all)
+        self.api_keys_button = Button(310, constants.SCREEN_HEIGHT - 70, 120, 40, "Manage Keys", self._manage_api_keys)
+        self.apply_button = Button(constants.SCREEN_WIDTH - 200, constants.SCREEN_HEIGHT - 70, 120, 40, "Apply & Save", self._apply_settings)
         
         # Callbacks
         self.on_back = None
@@ -177,12 +178,17 @@ class SettingsMenu:
                              ["30", "60", "120", "Unlimited"].index(str(self.settings.get("fps_limit", 60))),
                              lambda v: self.settings.set("fps_limit", int(v) if v != "Unlimited" else -1)),
                 
-                DropdownButton(280, y_offset + 100, 200, 35, "UI Scale", 
+                DropdownButton(280, y_offset + 100, 200, 35, "Resolution", 
+                             ["1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440"], 
+                             ["1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440"].index(self.settings.get("screen_resolution", "1600x900")),
+                             lambda v: self.settings.set("screen_resolution", v)),
+                
+                DropdownButton(50, y_offset + 150, 200, 35, "UI Scale", 
                              ["0.8x", "1.0x", "1.2x", "1.5x"],
                              int((self.settings.get("ui_scale", 1.0) - 0.8) / 0.2),
                              lambda v: self.settings.set("ui_scale", 0.8 + ["0.8x", "1.0x", "1.2x", "1.5x"].index(v) * 0.2)),
                 
-                ToggleButton(50, y_offset + 150, 200, 35, "Colorblind Mode", 
+                ToggleButton(280, y_offset + 150, 200, 35, "Colorblind Mode", 
                            self.settings.get("colorblind_mode"),
                            lambda v: self.settings.set("colorblind_mode", v)),
             ])
@@ -316,10 +322,15 @@ class SettingsMenu:
             ])
         
         elif self.current_tab == "Performance":
+            max_npcs_options = ["3", "5", "10", "15", "20", "25"]
+            current_max_npcs = str(self.settings.get("max_npcs", 10))
+            if current_max_npcs not in max_npcs_options:
+                current_max_npcs = "10"
+            
             self.controls.extend([
                 DropdownButton(50, y_offset, 200, 35, "Max NPCs", 
-                             ["5", "10", "15", "20", "25"],
-                             ["5", "10", "15", "20", "25"].index(str(self.settings.get("max_npcs", 10))),
+                             max_npcs_options,
+                             max_npcs_options.index(current_max_npcs),
                              lambda v: self.settings.set("max_npcs", int(v))),
                 
                 ToggleButton(50, y_offset + 50, 250, 35, "Low Performance Mode", 
@@ -427,8 +438,8 @@ class SettingsMenu:
         self.screen.fill((25, 35, 45))
         
         # Title
-        title_text = self.font_title.render("Settings", True, WHITE)
-        title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, 40))
+        title_text = self.font_title.render("Settings", True, constants.WHITE)
+        title_rect = title_text.get_rect(center=(constants.SCREEN_WIDTH // 2, 40))
         self.screen.blit(title_text, title_rect)
         
         # Tab buttons
@@ -441,13 +452,18 @@ class SettingsMenu:
             else:
                 button.draw(self.screen)
         
-        # Settings area background
-        settings_rect = pygame.Rect(30, 130, SCREEN_WIDTH - 60, SCREEN_HEIGHT - 220)
+        # Settings area background - leave space for buttons at bottom
+        settings_rect = pygame.Rect(30, 130, constants.SCREEN_WIDTH - 60, constants.SCREEN_HEIGHT - 250)
         pygame.draw.rect(self.screen, (35, 45, 55), settings_rect, border_radius=10)
         pygame.draw.rect(self.screen, (80, 80, 80), settings_rect, 2, border_radius=10)
         
         # Current tab content
         self._draw_tab_content()
+        
+        # Draw separator line above buttons
+        separator_y = constants.SCREEN_HEIGHT - 120
+        pygame.draw.line(self.screen, (80, 80, 80), 
+                        (50, separator_y), (constants.SCREEN_WIDTH - 50, separator_y), 2)
         
         # Control buttons
         self.back_button.draw(self.screen)
@@ -457,12 +473,12 @@ class SettingsMenu:
         
         # Help text
         help_text = self.font_label.render(f"Current Tab: {self.current_tab} | Scroll with mouse wheel", True, (150, 150, 150))
-        help_rect = help_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 25))
+        help_rect = help_text.get_rect(center=(constants.SCREEN_WIDTH // 2, constants.SCREEN_HEIGHT - 25))
         self.screen.blit(help_text, help_rect)
     
     def _draw_tab_content(self):
         # Create clipping area for scrolling
-        clip_rect = pygame.Rect(50, 150, SCREEN_WIDTH - 100, SCREEN_HEIGHT - 250)
+        clip_rect = pygame.Rect(50, 150, constants.SCREEN_WIDTH - 100, constants.SCREEN_HEIGHT - 280)
         self.screen.set_clip(clip_rect)
         
         # Draw controls with scroll offset
@@ -473,7 +489,7 @@ class SettingsMenu:
                 control.rect.y = original_y - self.scroll_offset
                 
                 # Only draw if visible
-                if control.rect.bottom > 150 and control.rect.top < SCREEN_HEIGHT - 100:
+                if control.rect.bottom > 150 and control.rect.top < constants.SCREEN_HEIGHT - 130:
                     control.draw(self.screen)
                 
                 # Restore original position
@@ -486,7 +502,7 @@ class SettingsMenu:
         if len(self.controls) * 60 > 400:
             scrollbar_height = 300
             scrollbar_y = 150
-            scrollbar_x = SCREEN_WIDTH - 45
+            scrollbar_x = constants.SCREEN_WIDTH - 45
             
             # Scrollbar background
             pygame.draw.rect(self.screen, (60, 60, 60), 

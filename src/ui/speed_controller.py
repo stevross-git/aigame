@@ -13,11 +13,11 @@ class GameSpeedController:
         self.font = pygame.font.Font(None, 20)
         self.small_font = pygame.font.Font(None, 16)
         
-        # Position and size
+        # Position and size - moved to top left
         self.width = 200
         self.height = 50
         self.x = 10
-        self.y = SCREEN_HEIGHT - self.height - 10
+        self.y = 10
         
         # Speed control
         self.min_speed = 0.1
@@ -254,8 +254,8 @@ class GameSpeedController:
         speed_rect.y = self.y + self.height - 20
         self.screen.blit(speed_surface, speed_rect)
         
-        # Draw help text
-        help_text = "Space: Pause | 1-4: Presets | +/-: Adjust"
+        # Draw help text (shorter for top position)
+        help_text = "Space: Pause | 1-4: Speed"
         help_surface = self.small_font.render(help_text, True, (150, 150, 150))
         help_rect = help_surface.get_rect()
         help_rect.right = self.x + self.width - 5

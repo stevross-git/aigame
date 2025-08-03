@@ -2,6 +2,44 @@ import pygame
 from typing import Optional, List, Callable
 from src.core.constants import *
 from src.ui.menu import Button
+from src.graphics.custom_asset_manager import CustomAssetManager
+
+class IconButton(Button):
+    """Button with icon support for interaction menu"""
+    
+    def __init__(self, x, y, width, height, text, callback, font_size=20, icon=None):
+        super().__init__(x, y, width, height, text, callback, font_size)
+        self.icon = icon
+        self.icon_padding = 8
+    
+    def draw(self, screen):
+        """Draw button with icon"""
+        # Use same color logic as base Button class
+        color = (100, 100, 100) if not self.enabled else (70, 130, 180) if self.hovered else (60, 60, 60)
+        border_color = (200, 200, 200) if self.hovered else (150, 150, 150)
+        text_color = (200, 200, 200) if not self.enabled else WHITE
+        
+        # Draw button background and border
+        pygame.draw.rect(screen, color, self.rect, border_radius=5)
+        pygame.draw.rect(screen, border_color, self.rect, 2, border_radius=5)
+        
+        # Draw icon and text with proper positioning
+        if self.icon:
+            # Draw icon on the left
+            icon_x = self.rect.x + self.icon_padding
+            icon_y = self.rect.centery - self.icon.get_height() // 2
+            screen.blit(self.icon, (icon_x, icon_y))
+            
+            # Draw text next to icon
+            text_x = icon_x + self.icon.get_width() + self.icon_padding
+            text_surface = self.font.render(self.text, True, text_color)
+            text_y = self.rect.centery - text_surface.get_height() // 2
+            screen.blit(text_surface, (text_x, text_y))
+        else:
+            # No icon, draw text centered (fallback to base button behavior)
+            text_surface = self.font.render(self.text, True, text_color)
+            text_rect = text_surface.get_rect(center=self.rect.center)
+            screen.blit(text_surface, text_rect)
 
 class InteractionMenu:
     """
@@ -14,6 +52,10 @@ class InteractionMenu:
         self.font_title = pygame.font.Font(None, 24)
         self.font_option = pygame.font.Font(None, 20)
         self.font_info = pygame.font.Font(None, 16)
+        
+        # Asset manager for icons
+        self.assets = CustomAssetManager()
+        self._create_interaction_icons()
         
         self.visible = False
         self.target_npc = None
@@ -45,12 +87,91 @@ class InteractionMenu:
         self.custom_dialogue_mode = False
         self.custom_dialogue_text = ""
         self.dialogue_cursor_timer = 0
+        
+        # Game pause state callback
+        self.on_pause_game = None
+        self.on_resume_game = None
+    
+    def set_callback(self, event_name: str, callback):
+        """Set a callback for interaction events"""
+        self.callbacks[event_name] = callback
+    
+    def _create_interaction_icons(self):
+        """Create simple pixel art icons for interaction options"""
+        icon_size = 16
+        
+        # Greet icon (hand wave)
+        greet_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        pygame.draw.circle(greet_icon, (255, 220, 177), (8, 5), 3)  # Head
+        pygame.draw.rect(greet_icon, (100, 150, 255), (6, 8, 4, 6))  # Body
+        pygame.draw.rect(greet_icon, (255, 220, 177), (4, 9, 2, 3))  # Arm
+        self.assets.icons["greet"] = greet_icon
+        
+        # Chat icon (speech bubble)
+        chat_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        pygame.draw.ellipse(chat_icon, (255, 255, 255), (2, 2, 12, 8))
+        pygame.draw.ellipse(chat_icon, (100, 100, 100), (2, 2, 12, 8), 1)
+        pygame.draw.circle(chat_icon, (100, 100, 100), (6, 6), 1)
+        pygame.draw.circle(chat_icon, (100, 100, 100), (8, 6), 1)
+        pygame.draw.circle(chat_icon, (100, 100, 100), (10, 6), 1)
+        self.assets.icons["chat"] = chat_icon
+        
+        # Chat window icon (window with text)
+        chat_window_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        pygame.draw.rect(chat_window_icon, (50, 50, 50), (1, 1, 14, 12))
+        pygame.draw.rect(chat_window_icon, (255, 255, 255), (2, 2, 12, 10))
+        pygame.draw.rect(chat_window_icon, (0, 0, 0), (3, 4, 8, 1))
+        pygame.draw.rect(chat_window_icon, (0, 0, 0), (3, 6, 6, 1))
+        pygame.draw.rect(chat_window_icon, (0, 0, 0), (3, 8, 7, 1))
+        self.assets.icons["chat_window"] = chat_window_icon
+        
+        # Gift icon (present box)
+        gift_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        pygame.draw.rect(gift_icon, (255, 100, 100), (4, 6, 8, 6))
+        pygame.draw.rect(gift_icon, (255, 200, 100), (7, 4, 2, 8))
+        pygame.draw.rect(gift_icon, (255, 200, 100), (4, 7, 8, 2))
+        self.assets.icons["gift"] = gift_icon
+        
+        # Activity icon (two figures)
+        activity_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        pygame.draw.circle(activity_icon, (255, 220, 177), (5, 4), 2)  # Head 1
+        pygame.draw.circle(activity_icon, (255, 220, 177), (11, 4), 2)  # Head 2
+        pygame.draw.rect(activity_icon, (100, 150, 255), (4, 6, 2, 4))  # Body 1
+        pygame.draw.rect(activity_icon, (150, 100, 255), (10, 6, 2, 4))  # Body 2
+        self.assets.icons["activity"] = activity_icon
+        
+        # Ask icon (question mark)
+        ask_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        pygame.draw.circle(ask_icon, (255, 255, 100), (8, 8), 7)
+        pygame.draw.circle(ask_icon, (0, 0, 0), (8, 8), 7, 2)
+        font = pygame.font.Font(None, 16)
+        question_text = font.render("?", True, (0, 0, 0))
+        question_rect = question_text.get_rect(center=(8, 8))
+        ask_icon.blit(question_text, question_rect)
+        self.assets.icons["ask"] = ask_icon
+        
+        # Custom dialogue icon (pencil)
+        custom_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        pygame.draw.rect(custom_icon, (139, 69, 19), (6, 2, 2, 10))  # Pencil body
+        pygame.draw.polygon(custom_icon, (255, 255, 0), [(6, 2), (8, 2), (7, 0)])  # Tip
+        self.assets.icons["custom"] = custom_icon
+        
+        # Cancel icon (X)
+        cancel_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        pygame.draw.circle(cancel_icon, (255, 100, 100), (8, 8), 7)
+        pygame.draw.line(cancel_icon, (255, 255, 255), (4, 4), (12, 12), 2)
+        pygame.draw.line(cancel_icon, (255, 255, 255), (12, 4), (4, 12), 2)
+        self.assets.icons["cancel"] = cancel_icon
     
     def show(self, player, npc, mouse_pos=None):
         """Show interaction menu for given NPC"""
         self.visible = True
         self.target_npc = npc
         self.player = player
+        
+        # Pause the game during NPC interaction
+        if self.on_pause_game:
+            self.on_pause_game()
         
         # Position menu near mouse or center screen
         if mouse_pos:
@@ -69,6 +190,10 @@ class InteractionMenu:
         self.target_npc = None
         self.custom_dialogue_mode = False
         self.custom_dialogue_text = ""
+        
+        # Resume the game when hiding interaction menu
+        if self.on_resume_game:
+            self.on_resume_game()
     
     def _create_interaction_buttons(self):
         """Create buttons for different interaction options"""
@@ -77,23 +202,23 @@ class InteractionMenu:
         button_height = 30
         button_spacing = 5
         
-        # Basic interactions
+        # Basic interactions with icon keys
         interactions = [
-            ("👋 Greet", self._greet_npc),
-            ("💬 Chat", self._chat_with_npc),
-            ("💭 Open Chat Window", self._open_chat_window),
-            ("🎁 Give Gift", self._give_gift),
-            ("🤝 Invite to Activity", self._invite_activity),
-            ("❓ Ask About", self._ask_about),
-            ("✍️ Say Something...", self._enable_custom_dialogue),
-            ("❌ Cancel", self.hide)
+            ("Greet", "greet", self._greet_npc),
+            ("Chat", "chat", self._chat_with_npc),
+            ("Open Chat Window", "chat_window", self._open_chat_window),
+            ("Give Gift", "gift", self._give_gift),
+            ("Invite to Activity", "activity", self._invite_activity),
+            ("Ask About", "ask", self._ask_about),
+            ("Say Something...", "custom", self._enable_custom_dialogue),
+            ("Cancel", "cancel", self.hide)
         ]
         
-        for text, callback in interactions:
-            button = Button(
+        for text, icon_key, callback in interactions:
+            button = IconButton(
                 self.x + 20, button_y, 
                 self.width - 40, button_height,
-                text, callback, 18
+                text, callback, 18, icon=self.assets.icons.get(icon_key)
             )
             self.interaction_buttons.append(button)
             button_y += button_height + button_spacing
@@ -113,12 +238,14 @@ class InteractionMenu:
     
     def _greet_npc(self):
         """Simple greeting interaction"""
+        print(f"👋 Greeting {self.target_npc.name if self.target_npc else 'NPC'}!")
         if self.callbacks.get('on_greet'):
             self.callbacks['on_greet'](self.player, self.target_npc)
         self.hide()
     
     def _chat_with_npc(self):
         """Start a conversation"""
+        print(f"💬 Starting conversation with {self.target_npc.name if self.target_npc else 'NPC'}!")
         if self.callbacks.get('on_chat'):
             self.callbacks['on_chat'](self.player, self.target_npc)
         self.hide()
@@ -127,6 +254,9 @@ class InteractionMenu:
         """Open the chat interface window"""
         if self.callbacks.get('on_open_chat'):
             self.callbacks['on_open_chat'](self.player, self.target_npc)
+        else:
+            # Fallback behavior
+            print(f"Opening chat window with {self.target_npc.name}!")
         self.hide()
     
     def _give_gift(self):
@@ -181,11 +311,10 @@ class InteractionMenu:
                     return True
             return True
         
-        # Handle button clicks
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            for button in self.interaction_buttons:
-                if button.handle_event(event):
-                    return True
+        # Handle button events (clicks and hover)
+        for button in self.interaction_buttons:
+            if button.handle_event(event):
+                return True
         
         # Close menu on escape or right click
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -236,7 +365,16 @@ class InteractionMenu:
         self.screen.blit(rel_surface, rel_rect)
         
         # Draw NPC mood/emotion
-        emotion_text = f"Mood: {self.target_npc.emotion}"
+        # Get emotion from emotional_state if available
+        emotion = None
+        if hasattr(self.target_npc, 'emotional_state') and hasattr(self.target_npc.emotional_state, 'primary_emotion'):
+            emotion = self.target_npc.emotional_state.primary_emotion.value
+        elif hasattr(self.target_npc, 'emotion'):
+            emotion = self.target_npc.emotion
+        else:
+            emotion = 'neutral'
+        
+        emotion_text = f"Mood: {emotion}"
         emotion_surface = self.font_info.render(emotion_text, True, (200, 200, 200))
         emotion_rect = emotion_surface.get_rect(center=(self.x + self.width // 2, self.y + 55))
         self.screen.blit(emotion_surface, emotion_rect)
