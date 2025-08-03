@@ -78,6 +78,16 @@ class EnhancedPlayer(pygame.sprite.Sprite):
         }
         self.emotion = "neutral"
         
+        # Social system integration
+        self.social_system = None  # Will be set by game
+        self.social_feedback_messages = []  # Recent social feedback
+        
+        # Weight system
+        self.base_weight = 70.0  # Base weight in kg
+        self.inventory_weight = 0.0  # Weight from inventory items
+        self.max_carry_weight = 50.0  # Maximum weight player can carry
+        self.encumbered = False  # Whether player is over-encumbered
+        
         # Relationships with NPCs
         self.relationships = {}
         
@@ -89,6 +99,12 @@ class EnhancedPlayer(pygame.sprite.Sprite):
         self.input_buffer = []
         self.buffer_time = 0.1  # 100ms input buffer
         self.is_running = False  # Shift key held
+        
+        # Wait action state
+        self.is_waiting = False
+        self.wait_timer = 0.0
+        self.wait_duration = 0.0
+        self.wait_message = None
         
         # Camera shake for dynamic movement
         self.camera_shake_intensity = 0.0
@@ -148,6 +164,15 @@ class EnhancedPlayer(pygame.sprite.Sprite):
         """Enhanced update with smooth movement and animations"""
         old_velocity = self.velocity.copy()
         
+        # Update weight status
+        self._update_weight_status()
+        
+        # Update wait timer
+        if self.is_waiting:
+            self.wait_timer -= dt
+            if self.wait_timer <= 0:
+                self.stop_wait()
+        
         # Handle input with buffer and enhanced controls
         self._handle_input(keys, dt)
         
@@ -169,6 +194,9 @@ class EnhancedPlayer(pygame.sprite.Sprite):
             if self.dialogue_timer <= 0:
                 self.current_dialogue = None
         
+        # Update social feedback
+        self.update_social_feedback(dt)
+        
         # Update camera shake
         if self.camera_shake_duration > 0:
             self.camera_shake_duration -= dt
@@ -177,6 +205,17 @@ class EnhancedPlayer(pygame.sprite.Sprite):
     
     def _handle_input(self, keys, dt):
         """Enhanced input handling with buffering and modifiers"""
+        # Check for wait action (Space key)
+        if keys[pygame.K_SPACE] and not self.is_waiting:
+            self.start_wait(3.0)  # Default 3 second wait
+            return
+        
+        # If waiting, don't process movement
+        if self.is_waiting:
+            self.target_velocity.x = 0
+            self.target_velocity.y = 0
+            return
+        
         # Check for running modifier
         self.is_running = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
         
@@ -553,7 +592,7 @@ class EnhancedPlayer(pygame.sprite.Sprite):
     
     # Keep all the interaction methods from the original player
     def interact_with_npc(self, npc, interaction_type: str, custom_message: str = None):
-        """Handle interaction with an NPC"""
+        """Handle interaction with an NPC with social rating system"""
         # Initialize relationship if doesn't exist
         if npc.name not in self.relationships:
             self.relationships[npc.name] = 0.3
@@ -562,18 +601,52 @@ class EnhancedPlayer(pygame.sprite.Sprite):
             npc.relationships[self.name] = 0.3
         
         # Handle different interaction types
+        message = ""
+        gift_value = 0
+        
         if interaction_type == "greet":
-            self._greet_npc(npc)
+            message = self._greet_npc(npc)
         elif interaction_type == "chat":
-            self._chat_with_npc(npc)
+            message = self._chat_with_npc(npc)
         elif interaction_type == "give_gift":
-            self._give_gift_to_npc(npc)
+            message, gift_value = self._give_gift_to_npc(npc)
         elif interaction_type == "invite_activity":
-            self._invite_npc_to_activity(npc)
+            message = self._invite_npc_to_activity(npc)
         elif interaction_type == "ask_about":
-            self._ask_npc_about(npc)
+            message = self._ask_npc_about(npc)
         elif interaction_type == "custom_dialogue":
-            self._custom_dialogue_with_npc(npc, custom_message)
+            message = self._custom_dialogue_with_npc(npc, custom_message)
+        
+        # Get NPC's rating of the interaction
+        if hasattr(npc, 'rate_player_interaction'):
+            rating = npc.rate_player_interaction(
+                player_name=self.name,
+                interaction_type=interaction_type,
+                message=message,
+                gift_value=gift_value
+            )
+            
+            if rating:
+                # Show social feedback
+                self._show_social_feedback(rating, npc.name)
+                
+                # Update player's social need based on interaction quality
+                if rating.final_score >= 7.0:
+                    self.needs["social"] = min(1.0, self.needs["social"] + 0.1)
+                elif rating.final_score >= 5.0:
+                    self.needs["social"] = min(1.0, self.needs["social"] + 0.05)
+                
+                # Award bonus social points for high-quality interactions
+                if self.social_system and rating.social_points_awarded > 0:
+                    bonus_multiplier = 1.0
+                    if rating.final_score >= 9.0:
+                        bonus_multiplier = 1.5  # 50% bonus for exceptional interactions
+                    elif rating.final_score >= 8.0:
+                        bonus_multiplier = 1.2  # 20% bonus for great interactions
+                    
+                    bonus_points = int(rating.social_points_awarded * (bonus_multiplier - 1.0))
+                    if bonus_points > 0:
+                        self.social_system.award_social_points(bonus_points, f"{interaction_type}_bonus")
     
     def _greet_npc(self, npc):
         """Simple greeting interaction"""
@@ -588,10 +661,6 @@ class EnhancedPlayer(pygame.sprite.Sprite):
         greeting = random.choice(greetings)
         self.say(greeting)
         
-        # Small relationship boost
-        self._adjust_relationship(npc, 0.05)
-        npc._adjust_relationship(self, 0.05)
-        
         # NPC responds
         npc_responses = [
             f"Hi {self.name}!",
@@ -600,6 +669,8 @@ class EnhancedPlayer(pygame.sprite.Sprite):
             "Good to see you too!"
         ]
         npc.say(random.choice(npc_responses))
+        
+        return greeting
     
     def _chat_with_npc(self, npc):
         """Start a conversation with NPC"""
@@ -614,27 +685,30 @@ class EnhancedPlayer(pygame.sprite.Sprite):
         starter = random.choice(chat_starters)
         self.say(starter)
         
-        # Bigger relationship boost for meaningful conversation
-        self._adjust_relationship(npc, 0.1)
-        npc._adjust_relationship(self, 0.1)
-        
         # Trigger AI response from NPC
         if hasattr(npc, 'ai_client') and npc.ai_client:
             self._trigger_npc_ai_response(npc, f"Player {self.name} is chatting with you. They said: '{starter}'")
+        
+        return starter
     
     def _give_gift_to_npc(self, npc):
         """Give a virtual gift to NPC"""
-        gifts = ["flowers", "chocolate", "book", "music", "art"]
+        gifts = {
+            "flowers": 50,
+            "chocolate": 75,
+            "book": 100,
+            "music": 80,
+            "art": 150
+        }
         import random
-        gift = random.choice(gifts)
+        gift, value = random.choice(list(gifts.items()))
         
-        self.say(f"I have {gift} for you, {npc.name}!")
-        
-        # Significant relationship boost
-        self._adjust_relationship(npc, 0.2)
-        npc._adjust_relationship(self, 0.2)
+        message = f"I have {gift} for you, {npc.name}!"
+        self.say(message)
         
         npc.say(f"Thank you so much, {self.name}! I love {gift}!")
+        
+        return message, value
     
     def _invite_npc_to_activity(self, npc):
         """Invite NPC to do an activity"""
@@ -642,18 +716,17 @@ class EnhancedPlayer(pygame.sprite.Sprite):
         import random
         activity = random.choice(activities)
         
-        self.say(f"Want to {activity} together, {npc.name}?")
+        message = f"Want to {activity} together, {npc.name}?"
+        self.say(message)
         
         # Relationship affects response
         relationship = self.relationships.get(npc.name, 0.3)
         if relationship > 0.6:
             npc.say(f"I'd love to {activity} with you, {self.name}!")
-            self._adjust_relationship(npc, 0.15)
-            npc._adjust_relationship(self, 0.15)
         else:
             npc.say(f"Maybe another time, {self.name}.")
-            self._adjust_relationship(npc, 0.05)
-            npc._adjust_relationship(self, 0.05)
+        
+        return message
     
     def _ask_npc_about(self, npc):
         """Ask NPC about something"""
@@ -661,40 +734,72 @@ class EnhancedPlayer(pygame.sprite.Sprite):
         import random
         topic = random.choice(topics)
         
-        self.say(f"Tell me about {topic}, {npc.name}.")
-        
-        self._adjust_relationship(npc, 0.08)
-        npc._adjust_relationship(self, 0.08)
+        message = f"Tell me about {topic}, {npc.name}."
+        self.say(message)
         
         # Trigger AI response
         if hasattr(npc, 'ai_client') and npc.ai_client:
             self._trigger_npc_ai_response(npc, f"Player {self.name} asked you about {topic}.")
+        
+        return message
     
     def _custom_dialogue_with_npc(self, npc, message):
         """Custom dialogue with NPC"""
-        self.say(message)
+        if not message:
+            message = "Hi there!"
         
-        # Relationship change based on message sentiment (simple)
-        if any(word in message.lower() for word in ['love', 'like', 'great', 'awesome', 'wonderful']):
-            self._adjust_relationship(npc, 0.1)
-            npc._adjust_relationship(self, 0.1)
-        elif any(word in message.lower() for word in ['hate', 'dislike', 'terrible', 'awful', 'bad']):
-            self._adjust_relationship(npc, -0.1)
-            npc._adjust_relationship(self, -0.1)
-        else:
-            self._adjust_relationship(npc, 0.05)
-            npc._adjust_relationship(self, 0.05)
+        self.say(message)
         
         # Trigger AI response
         if hasattr(npc, 'ai_client') and npc.ai_client:
             self._trigger_npc_ai_response(npc, f"Player {self.name} said to you: '{message}'")
+        
+        return message
     
     def _adjust_relationship(self, npc, change):
-        """Adjust relationship with NPC"""
+        """Adjust relationship with NPC (deprecated - use social system)"""
         if npc.name not in self.relationships:
             self.relationships[npc.name] = 0.3
         
         self.relationships[npc.name] = max(0, min(1, self.relationships[npc.name] + change))
+    
+    def _show_social_feedback(self, rating, npc_name: str):
+        """Show social feedback to player"""
+        # Show points gained
+        if rating.social_points_awarded > 0:
+            feedback_msg = f"+{rating.social_points_awarded} Social XP"
+            
+            # Add quality indicator
+            if rating.final_score >= 9.0:
+                feedback_msg += " (Exceptional!)"
+            elif rating.final_score >= 8.0:
+                feedback_msg += " (Great!)"
+            elif rating.final_score >= 7.0:
+                feedback_msg += " (Good!)"
+            
+            self.social_feedback_messages.append({
+                'message': feedback_msg,
+                'timer': 3.0,
+                'color': (100, 255, 100) if rating.final_score >= 7.0 else (255, 255, 100)
+            })
+        
+        # Keep only recent messages
+        if len(self.social_feedback_messages) > 5:
+            self.social_feedback_messages.pop(0)
+    
+    def update_social_feedback(self, dt):
+        """Update social feedback message timers"""
+        # Update timers and filter out expired messages
+        updated_messages = []
+        for msg in self.social_feedback_messages:
+            msg['timer'] -= dt
+            if msg['timer'] > 0:
+                updated_messages.append(msg)
+        self.social_feedback_messages = updated_messages
+    
+    def set_social_system(self, social_system):
+        """Set the social system reference"""
+        self.social_system = social_system
     
     def _trigger_npc_ai_response(self, npc, context):
         """Trigger an AI response from the NPC"""
@@ -723,3 +828,86 @@ class EnhancedPlayer(pygame.sprite.Sprite):
         # Sort by distance
         nearby.sort(key=lambda x: x[1])
         return [npc for npc, distance in nearby]
+    
+    def start_wait(self, duration=3.0, message=None):
+        """Start waiting for a specified duration"""
+        self.is_waiting = True
+        self.wait_duration = duration
+        self.wait_timer = duration
+        self.wait_message = message or "Waiting..."
+        self.current_dialogue = self.wait_message
+        self.dialogue_timer = duration + 0.5  # Show message slightly longer
+        
+        # Stop movement
+        self.velocity.x = 0
+        self.velocity.y = 0
+        self.target_velocity.x = 0
+        self.target_velocity.y = 0
+        self.current_direction = Direction.IDLE
+    
+    def stop_wait(self):
+        """Stop waiting and resume normal state"""
+        self.is_waiting = False
+        self.wait_timer = 0.0
+        self.wait_duration = 0.0
+        if self.wait_message and self.current_dialogue == self.wait_message:
+            self.current_dialogue = None
+            self.dialogue_timer = 0
+        self.wait_message = None
+    
+    def get_wait_progress(self):
+        """Get waiting progress as a percentage (0-1)"""
+        if not self.is_waiting or self.wait_duration <= 0:
+            return 1.0
+        return 1.0 - (self.wait_timer / self.wait_duration)
+    
+    def _update_weight_status(self):
+        """Update weight-related status and apply encumbrance effects"""
+        total_weight = self.inventory_weight
+        
+        # Check if encumbered
+        self.encumbered = total_weight > self.max_carry_weight
+        
+        # Apply movement speed penalties based on weight
+        if self.encumbered:
+            # Severely overweight - 50% speed reduction
+            weight_ratio = total_weight / self.max_carry_weight
+            speed_penalty = max(0.3, 1.0 - (weight_ratio - 1.0) * 0.5)
+            self.speed = constants.PLAYER_SPEED * speed_penalty
+            self.max_speed = self.speed * 1.5  # Running less effective when encumbered
+        elif total_weight > self.max_carry_weight * 0.75:
+            # Heavily loaded - 20% speed reduction
+            self.speed = constants.PLAYER_SPEED * 0.8
+            self.max_speed = self.speed * 1.8
+        elif total_weight > self.max_carry_weight * 0.5:
+            # Moderately loaded - 10% speed reduction
+            self.speed = constants.PLAYER_SPEED * 0.9
+            self.max_speed = self.speed * 1.9
+        else:
+            # Light load - normal speed
+            self.speed = constants.PLAYER_SPEED * 1.2
+            self.max_speed = self.speed * 2.0
+    
+    def add_inventory_weight(self, weight):
+        """Add weight from an inventory item"""
+        self.inventory_weight += weight
+        self._update_weight_status()
+    
+    def remove_inventory_weight(self, weight):
+        """Remove weight from an inventory item"""
+        self.inventory_weight = max(0, self.inventory_weight - weight)
+        self._update_weight_status()
+    
+    def get_total_weight(self):
+        """Get total weight being carried"""
+        return self.inventory_weight
+    
+    def get_weight_ratio(self):
+        """Get weight ratio for UI display (0-1, can exceed 1 if overencumbered)"""
+        if self.max_carry_weight <= 0:
+            return 0
+        return self.inventory_weight / self.max_carry_weight
+    
+    def can_carry_weight(self, additional_weight):
+        """Check if player can carry additional weight without being severely encumbered"""
+        return (self.inventory_weight + additional_weight) <= (self.max_carry_weight * 1.5)

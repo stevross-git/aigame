@@ -59,8 +59,9 @@ class Settings:
             "mute_audio": False,
             
             # AI Settings
-            "ai_provider": "Ollama",
+            "ai_provider": "OpenAI",
             "ollama_model": "llama2",
+            "openai_model": "gpt-3.5-turbo",
             "ai_decision_speed": "Normal",
             "ollama_timeout": 5.0,
             "enable_api_fallback": True,
@@ -227,6 +228,11 @@ class SettingsMenu:
                              ["llama2", "llama2:7b", "llama2:13b", "codellama"],
                              ["llama2", "llama2:7b", "llama2:13b", "codellama"].index(self.settings.get("ollama_model", "llama2")),
                              lambda v: self.settings.set("ollama_model", v)),
+                
+                DropdownButton(310, y_offset + 50, 250, 35, "OpenAI Model", 
+                             ["gpt-3.5-turbo", "gpt-4", "gpt-4o", "gpt-4o-mini"],
+                             ["gpt-3.5-turbo", "gpt-4", "gpt-4o", "gpt-4o-mini"].index(self.settings.get("openai_model", "gpt-3.5-turbo")),
+                             lambda v: self.settings.set("openai_model", v)),
                 
                 DropdownButton(50, y_offset + 100, 250, 35, "Decision Speed", 
                              ["Very Fast", "Fast", "Normal", "Slow", "Very Slow"],

@@ -449,20 +449,20 @@ class QuestUI:
             else:
                 alpha = 255
             
-            # Notification background
-            notif_rect = pygame.Rect(notif_x, notif_y + i * 45, 330, 35)
-            notif_bg_color = (*self.panel_color[:3], min(alpha, 220))
-            
-            # Create surface with per-pixel alpha
+            # Create notification surface with proper alpha handling
             notif_surface = pygame.Surface((330, 35), pygame.SRCALPHA)
-            pygame.draw.rect(notif_surface, notif_bg_color, (0, 0, 330, 35), border_radius=8)
-            pygame.draw.rect(notif_surface, (*self.border_color[:3], alpha), (0, 0, 330, 35), 2, border_radius=8)
             
+            # Draw background rectangle with RGB color only
+            pygame.draw.rect(notif_surface, self.panel_color, (0, 0, 330, 35), border_radius=8)
+            pygame.draw.rect(notif_surface, self.border_color, (0, 0, 330, 35), 2, border_radius=8)
+            
+            # Set alpha for the entire surface
+            notif_surface.set_alpha(min(alpha, 220))
             self.screen.blit(notif_surface, (notif_x, notif_y + i * 45))
             
-            # Notification text
-            text_color = (*self.text_color[:3], alpha)
-            text_surface = self.font_small.render(notification['message'], True, text_color)
+            # Notification text with proper color (RGB only)
+            text_surface = self.font_small.render(notification['message'], True, self.text_color)
+            text_surface.set_alpha(alpha)
             self.screen.blit(text_surface, (notif_x + 10, notif_y + i * 45 + 10))
     
     def _wrap_text(self, text: str, max_width: int, font: pygame.font.Font) -> List[str]:

@@ -1,9 +1,11 @@
 import random
 import math
 import datetime
+import time
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+from src.ai.ai_interaction_logger import log_ai_interaction
 
 class BehaviorState(Enum):
     IDLE = "idle"
@@ -277,35 +279,127 @@ class EnhancedAIBehavior:
         }
     
     def generate_advanced_behavior(self, npc_data: Dict, context: AIContext, personality: Dict) -> BehaviorResponse:
-        """Generate sophisticated behavior response based on comprehensive context"""
+        """Generate sophisticated behavior response using enhanced AI prompt"""
+        start_time = time.time()
+        npc_name = npc_data.get('name', 'unknown')
         
-        # Analyze current situation
+        # Try to use AI-based behavior generation first (more diverse)
+        ai_behavior, ai_prompt, model_name = self._generate_ai_behavior(npc_data, context, personality)
+        if ai_behavior:
+            # Log the AI-based behavior generation with full prompt
+            response_time_ms = int((time.time() - start_time) * 1000)
+            self._log_enhanced_ai_behavior(npc_name, ai_behavior, ai_prompt, context, npc_data, response_time_ms, model_name)
+            return ai_behavior
+        
+        # Fallback to rule-based behavior if AI fails
+        return self._generate_rule_based_behavior(npc_data, context, personality, start_time)
+    
+    def _generate_ai_behavior(self, npc_data: Dict, context: AIContext, personality: Dict) -> tuple[Optional['BehaviorResponse'], Optional[str], Optional[str]]:
+        """Generate behavior using enhanced AI prompt template"""
+        try:
+            # Try AI generation more frequently since we're using OpenAI now
+            import random
+            if random.random() > 0.8:  # 80% chance for AI-generated behavior
+                return None, None, None
+            
+            # Import settings to get the current AI provider and model
+            from src.ui.settings import Settings
+            settings = Settings()
+            
+            ai_provider = settings.get("ai_provider", "OpenAI")
+            
+            if ai_provider == "OpenAI":
+                # Use OpenAI client for behavior generation
+                from src.ai.api_fallback import APIFallbackClient
+                api_client = APIFallbackClient()
+                openai_model = settings.get("openai_model", "gpt-3.5-turbo")
+            else:
+                # Fallback to Ollama if selected
+                from src.ai.ollama_client import OllamaClient
+                ollama_model = settings.get("ollama_model", "llama2")
+                ai_client = OllamaClient(model_name=ollama_model)
+            
+            # Build the enhanced AI prompt
+            prompt = self._build_enhanced_ai_prompt(npc_data, context, personality)
+            
+            # Make AI decision call using enhanced prompt
+            try:
+                if ai_provider == "OpenAI":
+                    # Use OpenAI through the API fallback client
+                    response_text = api_client._call_openai(prompt)
+                else:
+                    # Use Ollama client if available
+                    if hasattr(ai_client, 'client') and ai_client.client:
+                        api_response = ai_client.client.generate(
+                            model=ai_client.model_name,
+                            prompt=prompt,
+                            options={
+                                "temperature": 0.8,
+                                "top_p": 0.9,
+                                "max_tokens": 200
+                            }
+                        )
+                        response_text = api_response['response'].strip()
+                    else:
+                        return None, None, None
+                
+                if response_text:
+                    # Parse JSON response
+                    import json
+                    
+                    # Extract JSON from response (handle potential extra text)
+                    start_idx = response_text.find('{')
+                    end_idx = response_text.rfind('}') + 1
+                    
+                    if start_idx >= 0 and end_idx > start_idx:
+                        json_str = response_text[start_idx:end_idx]
+                        ai_response = json.loads(json_str)
+                        
+                        # Convert AI response to BehaviorResponse
+                        behavior_response = BehaviorResponse(
+                            primary_action=ai_response.get('action', 'idle'),
+                            secondary_actions=ai_response.get('secondary_actions', []),
+                            target=None,  # Will be determined later
+                            dialogue=ai_response.get('dialogue', ''),
+                            emotion=ai_response.get('emotion', 'neutral'),
+                            reasoning=ai_response.get('reasoning', ''),
+                            duration=float(ai_response.get('duration', 60.0)),
+                            success_conditions=[],
+                            failure_fallbacks=[],
+                            memory_tags=[]
+                        )
+                        
+                        model_name = openai_model if ai_provider == "OpenAI" else ollama_model
+                        return behavior_response, prompt, model_name
+                    
+            except Exception as ai_error:
+                print(f"AI generation error for {npc_data.get('name', 'unknown')}: {ai_error}")
+                return None, None, None
+                
+            return None, None, None
+            
+        except Exception as e:
+            print(f"AI behavior generation failed: {e}")
+            return None, None, None
+    
+    def _generate_rule_based_behavior(self, npc_data: Dict, context: AIContext, personality: Dict, start_time: float) -> 'BehaviorResponse':
+        """Generate behavior using original rule-based system"""
+        npc_name = npc_data.get('name', 'unknown')
+        
+        # Original rule-based logic
         situation_analysis = self._analyze_situation(context, npc_data, personality)
-        
-        # Determine primary behavior state
         behavior_state = self._determine_behavior_state(situation_analysis, personality)
-        
-        # Generate goal-oriented actions
         actions = self._generate_goal_oriented_actions(behavior_state, situation_analysis, personality)
-        
-        # Craft contextual dialogue
         dialogue = self._generate_contextual_dialogue(behavior_state, context, personality, situation_analysis)
-        
-        # Determine emotional response
         emotion = self._determine_emotional_response(behavior_state, context, personality, situation_analysis)
-        
-        # Create reasoning explanation
         reasoning = self._generate_reasoning(behavior_state, actions, situation_analysis)
-        
-        # Determine duration and conditions
         duration = self._calculate_action_duration(behavior_state, actions, personality)
         success_conditions = self._define_success_conditions(behavior_state, actions)
         failure_fallbacks = self._define_failure_fallbacks(behavior_state, actions)
-        
-        # Generate memory tags for this interaction
         memory_tags = self._generate_memory_tags(behavior_state, context, actions)
         
-        return BehaviorResponse(
+        # Create behavior response
+        behavior_response = BehaviorResponse(
             primary_action=actions[0] if actions else "idle",
             secondary_actions=actions[1:] if len(actions) > 1 else [],
             target=self._determine_action_target(actions[0] if actions else "idle", context),
@@ -316,6 +410,151 @@ class EnhancedAIBehavior:
             success_conditions=success_conditions,
             failure_fallbacks=failure_fallbacks,
             memory_tags=memory_tags
+        )
+        
+        # Log the rule-based behavior generation
+        response_time_ms = int((time.time() - start_time) * 1000)
+        self._log_behavior_generation(npc_name, behavior_response, context, npc_data, response_time_ms, "rule_based")
+        
+        return behavior_response
+    
+    def _build_enhanced_ai_prompt(self, npc_data: Dict, context: AIContext, personality: Dict) -> str:
+        """Build the enhanced AI prompt template"""
+        
+        # Extract data with safe defaults
+        npc_name = npc_data.get('name', 'Unknown')
+        npc_personality = npc_data.get('personality_description', 'No personality defined')
+        needs = npc_data.get('needs', {})
+        
+        # Context data
+        time_of_day = getattr(context, 'time_of_day', 'unknown')
+        weather = getattr(context, 'weather', 'clear')
+        season = getattr(context, 'season', 'spring')
+        nearby_npcs = getattr(context, 'nearby_npcs', [])
+        nearby_buildings = getattr(context, 'nearby_buildings', [])
+        nearby_resources = getattr(context, 'nearby_resources', [])
+        current_events = getattr(context, 'current_events', [])
+        player_nearby = getattr(context, 'player_nearby', False)
+        player_relationship = getattr(context, 'player_relationship', 0.5)
+        current_emotion = getattr(context, 'current_emotion', 'neutral')
+        energy_level = getattr(context, 'energy_level', 1.0)
+        social_battery = getattr(context, 'social_battery', 1.0)
+        skill_levels = getattr(context, 'skill_levels', {})
+        goals = getattr(context, 'goals', [])
+        recent_activities = getattr(context, 'recent_activities', [])
+        unmet_needs = getattr(context, 'unmet_needs', [])
+        
+        # Build enhanced prompt
+        prompt = f"""You are the behavior engine for a life simulation game (similar to Stardew Valley or The Sims). 
+Your job is to generate **rich, varied, and context-aware next actions** for NPCs. 
+You must consider needs, emotions, personality, environment, and current events to make decisions feel human-like.
+
+### NPC Information
+- Name: {npc_name}
+- Personality: {npc_personality}
+- Current Emotion: {current_emotion}
+- Needs:
+  - Hunger: {needs.get('hunger', 0.5):.2f}
+  - Sleep: {needs.get('sleep', 0.5):.2f}
+  - Social: {needs.get('social', 0.5):.2f}
+  - Fun: {needs.get('fun', 0.5):.2f}
+- Energy Level: {energy_level:.2f}
+- Social Battery: {social_battery:.2f}
+- Skills: {skill_levels}
+- Goals: {goals}
+- Recent Activities: {recent_activities}
+
+### Environment & Context
+- Time of Day: {time_of_day}
+- Weather: {weather}
+- Season: {season}
+- Nearby NPCs: {nearby_npcs}
+- Nearby Buildings: {nearby_buildings}
+- Available Resources: {nearby_resources}
+- Current Events: {current_events}
+- Unmet Needs: {unmet_needs}
+- Player Nearby: {player_nearby} (relationship: {player_relationship:.2f})
+
+### Instructions
+1. Think like a real person in this situation with the given personality and needs.
+2. Choose an **action** that fits best (examples: seek_food, sleep, socialize, work, explore, rest, wait, pause, review_goals, organize_priorities, schedule_activities, visit_new_location, talk_to_npc, gather_resources, craft_item, read_book, exercise, meditate).
+3. Generate natural **dialogue** the NPC might say out loud or think internally.
+4. Pick an appropriate **emotion** (joy, sadness, curiosity, love, calm, excited, lonely, hungry, tired, playful, grateful, content, anxious, hopeful, etc.).
+5. Provide **reasoning** that explains why this is the right choice.
+6. Set a **duration** (seconds) based on the complexity of the action.
+7. Optionally add **secondary_actions** (e.g., wave_to_friend, glance_around, whistle, stretch, yawn).
+8. Ensure variation across NPCs and over time – do not repeat actions or dialogue unless it makes sense.
+
+### Output (JSON only)
+{{
+  "action": "...",
+  "dialogue": "...",
+  "emotion": "...",
+  "reasoning": "...",
+  "duration": <float>,
+  "secondary_actions": ["...", "..."]
+}}"""
+        
+        return prompt
+    
+    def _log_behavior_generation(self, npc_name: str, behavior_response: 'BehaviorResponse', 
+                                context: AIContext, npc_data: Dict, response_time_ms: int, provider: str):
+        """Log behavior generation for analysis"""
+        response_dict = {
+            "action": behavior_response.primary_action,
+            "target": behavior_response.target,
+            "dialogue": behavior_response.dialogue,
+            "emotion": behavior_response.emotion,
+            "reasoning": behavior_response.reasoning,
+            "duration": behavior_response.duration,
+            "secondary_actions": behavior_response.secondary_actions
+        }
+        
+        prompt_summary = f"Enhanced AI Behavior Generation for {npc_name}\n"
+        prompt_summary += f"Provider: {provider}\n"
+        prompt_summary += f"Context: Time={getattr(context, 'time_of_day', 'unknown')}, "
+        prompt_summary += f"NPCs={getattr(context, 'nearby_npcs', [])}, "
+        prompt_summary += f"Emotion={getattr(context, 'current_emotion', 'neutral')}"
+        
+        log_ai_interaction(
+            npc_name=npc_name,
+            request_type="enhanced_behavior",
+            prompt=prompt_summary,
+            context=context.__dict__,
+            npc_data=npc_data,
+            response_raw=f"Enhanced behavior generated: {behavior_response.primary_action}",
+            response_parsed=response_dict,
+            provider=f"enhanced_ai_engine_{provider}",
+            model="enhanced" if provider == "enhanced_ai_prompt" else "rule_based",
+            response_time_ms=response_time_ms,
+            cached=False
+        )
+    
+    def _log_enhanced_ai_behavior(self, npc_name: str, behavior_response: 'BehaviorResponse', 
+                                  full_prompt: str, context: AIContext, npc_data: Dict, response_time_ms: int, model_name: str = "gpt-3.5-turbo"):
+        """Log AI-generated behavior with full enhanced prompt"""
+        response_dict = {
+            "action": behavior_response.primary_action,
+            "target": behavior_response.target,
+            "dialogue": behavior_response.dialogue,
+            "emotion": behavior_response.emotion,
+            "reasoning": behavior_response.reasoning,
+            "duration": behavior_response.duration,
+            "secondary_actions": behavior_response.secondary_actions
+        }
+        
+        log_ai_interaction(
+            npc_name=npc_name,
+            request_type="enhanced_ai_behavior",
+            prompt=full_prompt,  # Log the full enhanced prompt
+            context=context.__dict__,
+            npc_data=npc_data,
+            response_raw=f"Enhanced AI behavior: {behavior_response.primary_action} - {behavior_response.dialogue}",
+            response_parsed=response_dict,
+            provider="enhanced_ai_openai",
+            model=model_name,
+            response_time_ms=response_time_ms,
+            cached=False
         )
     
     def _analyze_situation(self, context: AIContext, npc_data: Dict, personality: Dict) -> Dict:

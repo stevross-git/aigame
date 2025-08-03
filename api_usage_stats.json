@@ -1,7 +1,7 @@
 {
-  "total_tokens": 377426,
-  "total_cost_usd": 0.5989847500000002,
-  "total_requests": 1109,
+  "total_tokens": 600326,
+  "total_cost_usd": 0.9517632499999993,
+  "total_requests": 1551,
   "daily_stats": {
     "2025-08-02": {
       "tokens": 102315,
@@ -9,16 +9,21 @@
       "requests": 313
     },
     "2025-08-03": {
-      "tokens": 275111,
-      "cost": 0.4368315000000016,
-      "requests": 796
+      "tokens": 313155,
+      "cost": 0.49795050000000246,
+      "requests": 949
+    },
+    "2025-08-04": {
+      "tokens": 184856,
+      "cost": 0.29165950000000007,
+      "requests": 289
     }
   },
   "provider_breakdown": {
     "openai": {
-      "tokens": 377359,
-      "cost": 0.5989330000000002,
-      "requests": 1106
+      "tokens": 600259,
+      "cost": 0.9517114999999993,
+      "requests": 1548
     },
     "anthropic": {
       "tokens": 67,

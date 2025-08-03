@@ -37,6 +37,7 @@ from src.systems.skill_system import SkillSystem
 from src.systems.inventory_system import InventorySystem
 from src.systems.crafting_system import CraftingSystem
 from src.systems.resource_system import ResourceSystem
+from src.systems.social_system import SocialSystem
 from src.core.time_system import GameTime
 from src.core.save_system import SaveSystem
 from src.world.house_interior import HouseInterior
@@ -55,6 +56,7 @@ from src.ui.cache_stats_display import CacheStatsDisplay
 from src.ui.shortcut_keys_ui import ShortcutKeysUI
 from src.ui.draggable_hud_manager import DraggableHUDManager
 from src.ui.action_bar import ActionBar
+from src.ui.social_ui import SocialUI
 from src.world.shop_system import ShopSystem
 from src.world.shop_interior import ShopInterior
 
@@ -248,10 +250,18 @@ class Game:
                     self.skill_system = SkillSystem()  # Fallback
                 
                 try:
-                    self.inventory_system = InventorySystem()
+                    self.inventory_system = InventorySystem(player=self.player)
                 except Exception as e:
                     print(f"Error initializing inventory system: {e}")
-                    self.inventory_system = InventorySystem()  # Fallback
+                    self.inventory_system = InventorySystem(player=self.player)  # Fallback
+                
+                # Initialize social system
+                try:
+                    self.social_system = SocialSystem(player=self.player)
+                    self.player.set_social_system(self.social_system)
+                except Exception as e:
+                    print(f"Error initializing social system: {e}")
+                    self.social_system = SocialSystem(player=self.player)
                 
                 try:
                     self.crafting_system = CraftingSystem(self.inventory_system, self.skill_system, self.xp_system)
@@ -307,10 +317,17 @@ class Game:
                     self.action_bar = None
                 
                 try:
-                    self.drag_drop_inventory = DragDropInventory(self.screen, self.inventory_system, self.action_bar)
+                    self.drag_drop_inventory = DragDropInventory(self.screen, self.inventory_system, self.action_bar, self.player)
                 except Exception as e:
                     print(f"Error initializing drag drop inventory: {e}")
                     self.drag_drop_inventory = None
+                
+                # Initialize social UI
+                try:
+                    self.social_ui = SocialUI(self.screen, self.social_system, self.player)
+                except Exception as e:
+                    print(f"Error initializing social UI: {e}")
+                    self.social_ui = None
                 
                 # Initialize shop systems
                 try:
@@ -320,6 +337,18 @@ class Game:
                     print(f"Error initializing shop systems: {e}")
                     self.shop_system = None
                     self.shop_interior = None
+                
+                # Initialize mining shop
+                try:
+                    from src.world.mining_shop import MiningShop
+                    from src.ui.mining_shop_ui import MiningShopUI
+                    # Place mining shop near center of map
+                    self.mining_shop = MiningShop(800, 600)
+                    self.mining_shop_ui = MiningShopUI(self.screen, self.mining_shop, self.inventory_system, self.player)
+                except Exception as e:
+                    print(f"Error initializing mining shop: {e}")
+                    self.mining_shop = None
+                    self.mining_shop_ui = None
                 
                 # Initialize quest UI
                 try:
@@ -557,6 +586,11 @@ class Game:
             npc.ai_response_box = self.ai_response_box  # Pass response box reference
             npc.chat_interface = self.npc_chat_interface  # Pass chat interface reference
             npc.house_manager = self.npc_house_manager  # Pass house manager reference
+            
+            # Set social system for NPC
+            if hasattr(self, 'social_system'):
+                npc.set_social_system(self.social_system)
+            
             self.npcs.append(npc)
             
             # Assign a house to each NPC
@@ -650,7 +684,14 @@ class Game:
                     return
                 if hasattr(self, 'xp_display_ui') and self.xp_display_ui and self.xp_display_ui.handle_event(event):
                     return
+                
+                # Handle social UI events
+                if self.social_ui and self.social_ui.handle_event(event):
+                    return
                 if hasattr(self, 'shop_interior') and self.shop_interior and self.shop_interior.handle_event(event):
+                    return
+                # Handle mining shop UI events
+                if hasattr(self, 'mining_shop_ui') and self.mining_shop_ui and self.mining_shop_ui.handle_event(event):
                     return
                 if hasattr(self, 'action_bar') and self.action_bar and self.action_bar.handle_event(event):
                     return
@@ -705,28 +746,32 @@ class Game:
                     elif event.key == pygame.K_F8:
                         # Clear AI responses
                         self.ai_response_box.clear_responses()
-                    elif event.key == pygame.K_i or event.key == pygame.K_TAB:
-                        # Toggle inventory (I or Tab key)
+                    elif event.key == pygame.K_F9:
+                        # F9: Print AI interaction summary
+                        from src.ai.ai_interaction_logger import print_ai_summary
+                        print_ai_summary()
+                    elif event.key == pygame.K_F10:
+                        # F10: Export AI logs
+                        from src.ai.ai_interaction_logger import get_ai_logger
+                        logger = get_ai_logger()
+                        export_file = logger.export_detailed_log()
+                        if export_file:
+                            print(f"📁 AI logs exported to: {export_file}")
+                    elif event.key == pygame.K_i:
+                        # I key: Toggle inventory
                         keys = pygame.key.get_pressed()
                         
                         # Update quest objective for ANY inventory opened
                         if hasattr(self, 'quest_system') and self.quest_system:
                             self.quest_system.update_objective(ObjectiveType.OPEN_INVENTORY, "inventory")
                         
-                        # I key: Toggle between inventories based on Shift
-                        if event.key == pygame.K_i:
-                            if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
-                                # Shift+I: Skills/quick inventory
-                                self.skills_inventory_ui.toggle("inventory")
-                            else:
-                                # Just I: Detailed inventory
-                                if hasattr(self, 'detailed_inventory_ui'):
-                                    self.detailed_inventory_ui.toggle()
-                        
-                        # Tab key: Always open detailed inventory (most common)
-                        elif event.key == pygame.K_TAB:
-                            if hasattr(self, 'detailed_inventory_ui'):
-                                self.detailed_inventory_ui.toggle()
+                        if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
+                            # Shift+I: Skills/quick inventory
+                            self.skills_inventory_ui.toggle("inventory")
+                        else:
+                            # Just I: Open drag-drop inventory (same as TAB)
+                            if hasattr(self, 'drag_drop_inventory') and self.drag_drop_inventory:
+                                self.drag_drop_inventory.toggle()
                     elif event.key == pygame.K_k:
                         # Toggle skills
                         self.skills_inventory_ui.toggle("skills")
@@ -765,6 +810,10 @@ class Game:
                     elif event.key == pygame.K_e:
                         # Enter shop or interact with building
                         self._try_enter_shop()
+                    elif event.key == pygame.K_b:
+                        # Open mining shop if near
+                        print("B key pressed - trying to open mining shop")
+                        self._try_open_mining_shop()
                 
                 # Handle other UI components in order of priority
                 # Welcome message gets highest priority when visible
@@ -1090,6 +1139,13 @@ class Game:
         self.data_analysis_panel.draw()
         self.interaction_menu.draw()
         
+        # Draw social UI
+        if self.social_ui:
+            self.social_ui.draw()
+            # Draw NPC relationship info
+            if hasattr(self, 'npcs'):
+                self.social_ui.draw_npc_info(self.npcs, self.camera)
+        
         # Show FPS for monitoring performance
         fps_text = f"FPS: {self.clock.get_fps():.1f}"
         font = pygame.font.Font(None, 24)
@@ -1125,6 +1181,12 @@ class Game:
         # Draw shop interior
         if hasattr(self, 'shop_interior') and self.shop_interior:
             self.shop_interior.draw()
+        
+        # Draw mining shop building and UI
+        if hasattr(self, 'mining_shop') and self.mining_shop:
+            self.mining_shop.draw(self.screen, self.camera)
+        if hasattr(self, 'mining_shop_ui') and self.mining_shop_ui:
+            self.mining_shop_ui.draw()
         
         # Disable all effect drawing for maximum performance
         # if hasattr(self, 'player_movement_system') and self.player_movement_system:
@@ -1960,6 +2022,44 @@ class Game:
         except Exception as e:
             print(f"Error entering shop: {e}")
             self.notification_system.add_notification("❌ Error entering shop. Please try again.")
+    
+    def _try_open_mining_shop(self):
+        """Try to open the mining shop if player is nearby"""
+        try:
+            print(f"Mining shop check - hasattr: {hasattr(self, 'mining_shop')}")
+            if hasattr(self, 'mining_shop'):
+                print(f"Mining shop exists: {self.mining_shop is not None}")
+            if hasattr(self, 'mining_shop_ui'):
+                print(f"Mining shop UI exists: {self.mining_shop_ui is not None}")
+            
+            if not hasattr(self, 'mining_shop') or not self.mining_shop or not self.mining_shop_ui:
+                print("Mining shop not available - missing components")
+                self.notification_system.add_notification("❌ Mining shop not available!")
+                return
+            
+            # Check if player is near the mining shop
+            player_pos = (self.player.rect.centerx, self.player.rect.centery)
+            shop_pos = (self.mining_shop.rect.centerx, self.mining_shop.rect.centery)
+            print(f"Player position: {player_pos}, Shop position: {shop_pos}")
+            
+            is_near = self.mining_shop.is_near_player(self.player.rect, interaction_distance=80)
+            print(f"Player near mining shop: {is_near}")
+            
+            if is_near:
+                # Show greeting and open shop UI
+                greeting = self.mining_shop.get_greeting()
+                print(f"Opening mining shop with greeting: {greeting}")
+                self.player.say(greeting)
+                self.mining_shop_ui.show()
+                self.notification_system.add_notification("⛏️ Welcome to the Mining Shop! Press 'B' or ESC to close.")
+            else:
+                self.notification_system.add_notification("🚶 Get closer to the mining shop to interact!")
+                
+        except Exception as e:
+            print(f"Error opening mining shop: {e}")
+            import traceback
+            traceback.print_exc()
+            self.notification_system.add_notification("❌ Error opening mining shop. Please try again.")
     
     def _handle_house_events(self, event):
         """Handle events while inside the house"""

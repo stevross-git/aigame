@@ -2,7 +2,7 @@ import pygame
 import random
 import math
 import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from src.core.constants import *
 from src.entities.personality import Personality
 from src.ai.ollama_client import AIResponse
@@ -12,6 +12,7 @@ from src.ai.conversation_engine import ConversationEngine, ConversationContext, 
 from src.ai.enhanced_ai_behavior import EnhancedAIBehavior, AIContext, BehaviorState
 from src.ai.emotional_intelligence import EmotionalIntelligence, EmotionalState, EmotionType
 from src.graphics.custom_asset_manager import CustomAssetManager
+from src.systems.social_system import SocialSystem, InteractionType, InteractionRating
 
 class EnhancedNPC(pygame.sprite.Sprite):
     """
@@ -79,6 +80,12 @@ class EnhancedNPC(pygame.sprite.Sprite):
         self.quest_to_give = None  # Quest ID to give when reaching player
         self.approach_message = None  # Message to say when approaching
         
+        # Wait action state
+        self.is_waiting = False
+        self.wait_timer = 0.0
+        self.wait_duration = 0.0
+        self.wait_reason = None
+        
         # AI and conversation systems
         self.ai_client = None
         self.current_dialogue = None
@@ -113,6 +120,11 @@ class EnhancedNPC(pygame.sprite.Sprite):
         self.behavior_success_rates = {}
         self.social_observations = {}
         
+        # Social interaction system
+        self.social_system = None  # Will be set by game
+        self.last_interaction_rating = None
+        self.interaction_history = []  # Track recent interactions for learning
+        
         # Goals and planning
         self.current_goals = []
         self.long_term_goals = []
@@ -144,17 +156,25 @@ class EnhancedNPC(pygame.sprite.Sprite):
     
     def update(self, dt, other_npcs, active_events=None):
         """Enhanced update with sophisticated AI processing"""
+        # Update wait timer if waiting
+        if self.is_waiting:
+            self.wait_timer -= dt
+            if self.wait_timer <= 0:
+                self.stop_wait()
+        
         # Update basic systems
         self._update_needs(dt)
         self._update_emotional_state(dt, other_npcs, active_events)
         self._update_social_awareness(other_npcs)
         self._update_environmental_awareness(active_events)
         
-        # Enhanced AI behavior update
-        self._update_enhanced_ai_behavior(dt, other_npcs, active_events)
+        # Enhanced AI behavior update (skip if waiting)
+        if not self.is_waiting:
+            self._update_enhanced_ai_behavior(dt, other_npcs, active_events)
         
-        # Movement and animation
-        self._move(dt)
+        # Movement and animation (skip movement if waiting)
+        if not self.is_waiting:
+            self._move(dt)
         self._update_animation(dt)
         
         # Check if NPC should go home for stat restoration
@@ -303,6 +323,31 @@ class EnhancedNPC(pygame.sprite.Sprite):
             # Execute the behavior
             self._execute_enhanced_behavior(behavior_response, other_npcs, active_events)
             
+            # ALSO make actual AI decision call to Ollama (in addition to enhanced behavior)
+            # This will generate the detailed AI interaction logs
+            if random.random() < 0.2:  # 20% chance to make actual AI call for analysis
+                try:
+                    # Build context for Ollama AI
+                    ai_context = {
+                        'situation': self.current_action or 'wandering around',
+                        'nearby_npcs': [npc.name for npc in other_npcs if self._get_distance(npc) < 100],
+                        'emotion': self.current_emotion,
+                        'active_events': [event.title for event in active_events] if active_events else []
+                    }
+                    
+                    # Make actual AI decision call (this will be logged)
+                    # This provides detailed AI interaction data for analysis
+                    npc_data = self._get_npc_data()
+                    ai_response = self.ai_client.make_decision(npc_data, ai_context)
+                    
+                    # Optional: Could blend AI response with enhanced behavior for variety
+                    # For now, we use enhanced behavior as primary, AI as supplementary data
+                    
+                except Exception as e:
+                    # AI calls may fail due to memory constraints or network issues
+                    # Enhanced behavior provides reliable fallback
+                    pass
+            
             # Send response to AI response box
             if self.ai_response_box:
                 self.ai_response_box.add_response(
@@ -408,6 +453,12 @@ class EnhancedNPC(pygame.sprite.Sprite):
         
         elif action == "rest" or action == "relax":
             self._rest()
+        
+        elif action == "wait" or action == "pause":
+            # Start waiting with AI-determined duration and reason
+            wait_duration = behavior_response.duration if behavior_response.duration > 0 else random.uniform(3.0, 10.0)
+            wait_reason = dialogue or "Taking a moment to think..."
+            self.start_wait(wait_duration, wait_reason)
         
         else:
             # Default wandering behavior
@@ -781,6 +832,166 @@ class EnhancedNPC(pygame.sprite.Sprite):
         self.current_dialogue = text
         self.dialogue_timer = max(8.0, len(text) * 0.1)  # Longer for longer messages
     
+    def rate_player_interaction(self, player_name: str, interaction_type: str, message: str = "", gift_value: int = 0) -> Optional[InteractionRating]:
+        """Rate a player interaction and provide feedback"""
+        if not self.social_system:
+            return None
+        
+        # Convert string to enum
+        try:
+            interaction_enum = InteractionType(interaction_type.lower())
+        except ValueError:
+            interaction_enum = InteractionType.CUSTOM
+        
+        # Get rating from social system
+        rating = self.social_system.rate_interaction(
+            npc=self,
+            player_name=player_name,
+            interaction_type=interaction_enum,
+            message=message,
+            gift_value=gift_value
+        )
+        
+        # Store the rating
+        self.last_interaction_rating = rating
+        self.interaction_history.append({
+            'player': player_name,
+            'type': interaction_type,
+            'message': message,
+            'rating': rating,
+            'timestamp': datetime.datetime.now()
+        })
+        
+        # Keep only recent interactions (last 10)
+        if len(self.interaction_history) > 10:
+            self.interaction_history.pop(0)
+        
+        # Adjust relationship based on rating
+        if player_name not in self.relationships:
+            self.relationships[player_name] = 0.5
+        
+        # Convert rating score to relationship change
+        if rating.final_score >= 8.0:
+            relationship_change = 0.15  # Great interaction
+        elif rating.final_score >= 7.0:
+            relationship_change = 0.10  # Good interaction
+        elif rating.final_score >= 6.0:
+            relationship_change = 0.05  # Decent interaction
+        elif rating.final_score >= 4.0:
+            relationship_change = 0.0   # Neutral interaction
+        elif rating.final_score >= 2.0:
+            relationship_change = -0.05 # Poor interaction
+        else:
+            relationship_change = -0.10 # Very poor interaction
+        
+        # Apply social skill bonus
+        if self.social_system.player:
+            bonus = self.social_system.get_interaction_bonus(interaction_type)
+            relationship_change *= bonus
+        
+        self.relationships[player_name] = max(0.0, min(1.0, 
+            self.relationships[player_name] + relationship_change))
+        
+        # Update emotional state based on interaction
+        self._update_emotional_state_from_interaction(rating)
+        
+        # Learn from the interaction
+        self._learn_from_interaction(player_name, interaction_type, rating)
+        
+        return rating
+    
+    def _update_emotional_state_from_interaction(self, rating: InteractionRating):
+        """Update NPC emotional state based on interaction rating"""
+        if not hasattr(self, 'emotional_state'):
+            return
+        
+        # Adjust emotional intensity based on interaction quality
+        if rating.final_score >= 8.0:
+            # Great interaction - boost positive emotions
+            if hasattr(self.emotional_state, 'primary_emotion'):
+                if self.emotional_state.primary_emotion in [EmotionType.JOY, EmotionType.TRUST]:
+                    self.emotional_state.intensity = min(1.0, self.emotional_state.intensity + 0.2)
+                else:
+                    self.emotional_state.primary_emotion = EmotionType.JOY
+                    self.emotional_state.intensity = 0.6
+        elif rating.final_score <= 3.0:
+            # Poor interaction - negative emotions
+            if hasattr(self.emotional_state, 'primary_emotion'):
+                self.emotional_state.primary_emotion = EmotionType.ANGER
+                self.emotional_state.intensity = min(1.0, self.emotional_state.intensity + 0.3)
+    
+    def _learn_from_interaction(self, player_name: str, interaction_type: str, rating: InteractionRating):
+        """Learn player preferences and interaction patterns"""
+        # Track what types of interactions this player tends to use
+        if player_name not in self.learned_preferences:
+            self.learned_preferences[player_name] = {
+                'preferred_interactions': {},
+                'conversation_style': 'neutral',
+                'gift_preferences': {},
+                'topics_of_interest': []
+            }
+        
+        # Update interaction preferences
+        prefs = self.learned_preferences[player_name]['preferred_interactions']
+        if interaction_type not in prefs:
+            prefs[interaction_type] = []
+        
+        prefs[interaction_type].append(rating.final_score)
+        
+        # Keep only recent scores (last 5 interactions of this type)
+        if len(prefs[interaction_type]) > 5:
+            prefs[interaction_type].pop(0)
+        
+        # Determine conversation style based on sentiment patterns
+        if rating.sentiment_modifier > 0.5:
+            self.learned_preferences[player_name]['conversation_style'] = 'positive'
+        elif rating.sentiment_modifier < -0.5:
+            self.learned_preferences[player_name]['conversation_style'] = 'negative'
+    
+    def get_interaction_feedback(self) -> Optional[str]:
+        """Get feedback message for the last interaction"""
+        if self.last_interaction_rating:
+            return self.last_interaction_rating.feedback_message
+        return None
+    
+    def get_relationship_status(self, player_name: str) -> Dict[str, Any]:
+        """Get detailed relationship information with a player"""
+        relationship_level = self.relationships.get(player_name, 0.5)
+        
+        # Determine relationship category
+        if relationship_level >= 0.9:
+            status = "Best Friend"
+        elif relationship_level >= 0.8:
+            status = "Close Friend"
+        elif relationship_level >= 0.6:
+            status = "Good Friend"
+        elif relationship_level >= 0.5:
+            status = "Friend"
+        elif relationship_level >= 0.3:
+            status = "Acquaintance"
+        elif relationship_level >= 0.1:
+            status = "Stranger"
+        else:
+            status = "Dislikes You"
+        
+        # Get interaction statistics
+        player_interactions = [h for h in self.interaction_history if h['player'] == player_name]
+        avg_rating = 0.0
+        if player_interactions:
+            avg_rating = sum(h['rating'].final_score for h in player_interactions) / len(player_interactions)
+        
+        return {
+            'level': relationship_level,
+            'status': status,
+            'total_interactions': len(player_interactions),
+            'average_rating': avg_rating,
+            'learned_preferences': self.learned_preferences.get(player_name, {})
+        }
+    
+    def set_social_system(self, social_system: SocialSystem):
+        """Set the social system reference"""
+        self.social_system = social_system
+    
     def draw(self, screen, camera):
         """Enhanced drawing with emotional visual cues"""
         screen.blit(self.image, camera.apply(self))
@@ -955,3 +1166,39 @@ class EnhancedNPC(pygame.sprite.Sprite):
             "emotion": self.emotion if hasattr(self, 'emotion') else 'neutral',
             "state": self.state
         }
+    
+    def start_wait(self, duration=5.0, reason=None):
+        """Start waiting for a specified duration"""
+        self.is_waiting = True
+        self.wait_duration = duration
+        self.wait_timer = duration
+        self.wait_reason = reason or "Taking a moment to rest"
+        
+        # Show wait dialogue
+        self.say(self.wait_reason)
+        
+        # Stop movement
+        self.velocity.x = 0
+        self.velocity.y = 0
+        self.target_pos = None
+        self.target_entity = None
+        self.state = "waiting"
+    
+    def stop_wait(self):
+        """Stop waiting and resume normal behavior"""
+        self.is_waiting = False
+        self.wait_timer = 0.0
+        self.wait_duration = 0.0
+        self.wait_reason = None
+        self.state = "idle"
+        
+        # Clear wait dialogue if still showing
+        if self.current_dialogue == self.wait_reason:
+            self.current_dialogue = None
+            self.dialogue_timer = 0
+    
+    def get_wait_progress(self):
+        """Get waiting progress as a percentage (0-1)"""
+        if not self.is_waiting or self.wait_duration <= 0:
+            return 1.0
+        return 1.0 - (self.wait_timer / self.wait_duration)

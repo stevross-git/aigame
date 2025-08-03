@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
 from src.ai.api_fallback import APIFallbackClient
 from src.ai.predictive_cache import PredictiveAICache
+from src.ai.ai_interaction_logger import log_ai_interaction
 
 @dataclass
 class AIResponse:
@@ -46,20 +47,44 @@ class OllamaClient:
             self.logger.info("Ollama disabled by configuration, using API fallback only")
     
     def make_decision(self, npc_data: Dict, context: Dict) -> AIResponse:
+        start_time = time.time()
+        npc_name = npc_data.get('name', 'unknown')
+        prompt = self._build_prompt(npc_data, context)
+        
         # Check cache first
         cached_response = self.predictive_cache.get_cached_response(npc_data, context)
         if cached_response:
-            self.logger.debug(f"Using cached response for {npc_data.get('name', 'unknown')}")
+            self.logger.debug(f"Using cached response for {npc_name}")
+            response_time_ms = int((time.time() - start_time) * 1000)
+            
+            # Log cached interaction
+            log_ai_interaction(
+                npc_name=npc_name,
+                request_type="decision",
+                prompt=prompt,
+                context=context,
+                npc_data=npc_data,
+                response_raw="[CACHED]",
+                response_parsed=cached_response.__dict__,
+                provider="cache",
+                model=self.model_name,
+                response_time_ms=response_time_ms,
+                cached=True
+            )
+            
             return cached_response
         
-        # Generate new response
-        prompt = self._build_prompt(npc_data, context)
+        response_raw = ""
+        provider = ""
+        error_message = None
         
         try:
             if self.use_fallback:
                 result = self.fallback_client.make_decision(prompt)
                 self.logger.info(f"Using {result['provider']} (response time: {result['response_time']:.2f}s)")
-                response = self._parse_response(result['response'])
+                response_raw = result['response']
+                provider = result['provider']
+                response = self._parse_response(response_raw)
             else:
                 api_response = self.client.generate(
                     model=self.model_name,
@@ -70,29 +95,61 @@ class OllamaClient:
                         "max_tokens": 150
                     }
                 )
-                response = self._parse_response(api_response['response'])
+                response_raw = api_response['response']
+                provider = "ollama"
+                response = self._parse_response(response_raw)
             
             # Cache the response
             self.predictive_cache.cache_response(npc_data, context, response)
-            return response
             
         except Exception as e:
             self.logger.error(f"AI request failed: {e}")
+            error_message = str(e)
             
             if not self.use_fallback:
                 self.logger.info("Attempting API fallback...")
                 try:
                     result = self.fallback_client.make_decision(prompt)
                     self.logger.info(f"Fallback successful using {result['provider']}")
-                    response = self._parse_response(result['response'])
+                    response_raw = result['response']
+                    provider = f"fallback_{result['provider']}"
+                    response = self._parse_response(response_raw)
+                    error_message = None  # Clear error since fallback worked
                     
                     # Cache the fallback response
                     self.predictive_cache.cache_response(npc_data, context, response)
-                    return response
+                    
                 except Exception as fallback_error:
                     self.logger.error(f"Fallback also failed: {fallback_error}")
-            
-            return self._get_fallback_decision(npc_data, context)
+                    error_message = f"Primary: {e}, Fallback: {fallback_error}"
+                    response = self._get_fallback_decision(npc_data, context)
+                    response_raw = "[HARDCODED_FALLBACK]"
+                    provider = "hardcoded"
+            else:
+                response = self._get_fallback_decision(npc_data, context)
+                response_raw = "[HARDCODED_FALLBACK]"
+                provider = "hardcoded"
+        
+        # Calculate response time
+        response_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log the complete interaction
+        log_ai_interaction(
+            npc_name=npc_name,
+            request_type="decision",
+            prompt=prompt,
+            context=context,
+            npc_data=npc_data,
+            response_raw=response_raw,
+            response_parsed=response.__dict__,
+            provider=provider,
+            model=self.model_name,
+            response_time_ms=response_time_ms,
+            cached=False,
+            error_message=error_message
+        )
+        
+        return response
     
     def make_decision_async(self, npc_data: Dict, context: Dict, callback: Callable[[AIResponse], None]) -> str:
         """

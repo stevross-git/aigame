@@ -2,6 +2,7 @@ import pygame
 from typing import Dict, Optional, List
 from src.core.constants import *
 from src.systems.inventory_system import InventorySystem, ItemType
+from src.graphics.tool_tileset import get_tool_tileset
 
 class ActionBar:
     """
@@ -11,6 +12,9 @@ class ActionBar:
     def __init__(self, screen, inventory_system: InventorySystem):
         self.screen = screen
         self.inventory = inventory_system
+        
+        # Initialize tool tileset
+        self.tool_tileset = get_tool_tileset()
         
         # Fonts
         self.font_normal = pygame.font.Font(None, 20)
@@ -31,14 +35,13 @@ class ActionBar:
         self.bar_width = self.num_slots * (self.slot_size + self.slot_spacing) - self.slot_spacing
         self.bar_height = self.slot_size + 20
         
-        # Position at bottom center of screen
+        # Position at bottom center of screen - adjusted for 1600x900
         self.x = (SCREEN_WIDTH - self.bar_width) // 2
-        self.y = SCREEN_HEIGHT - self.bar_height - 10
+        self.y = SCREEN_HEIGHT - self.bar_height - 15
         
         # Equipment state
         self.equipped_items: Dict[int, str] = {}  # slot_index -> item_id
         self.selected_slot = 0  # Currently selected slot (0-9)
-        self.equipped_tool = None  # Currently equipped tool for use
         
         # UI state
         self.visible = True
@@ -92,17 +95,6 @@ class ActionBar:
         """Select an action bar slot"""
         if 0 <= slot_index < self.num_slots:
             self.selected_slot = slot_index
-            
-            # Update equipped tool
-            if slot_index in self.equipped_items:
-                item_id = self.equipped_items[slot_index]
-                item_data = self.inventory.get_item_data(item_id)
-                if item_data and item_data.item_type == ItemType.TOOL:
-                    self.equipped_tool = item_id
-                else:
-                    self.equipped_tool = None
-            else:
-                self.equipped_tool = None
     
     def equip_item(self, item_id: str, slot_index: Optional[int] = None) -> bool:
         """Equip an item to the action bar"""
@@ -125,23 +117,12 @@ class ActionBar:
         # Equip new item
         self.equipped_items[slot_index] = item_id
         
-        # If this is the selected slot, update equipped tool
-        if slot_index == self.selected_slot:
-            item_data = self.inventory.get_item_data(item_id)
-            if item_data and item_data.item_type == ItemType.TOOL:
-                self.equipped_tool = item_id
-        
         return True
     
     def unequip_slot(self, slot_index: int) -> bool:
         """Unequip item from a slot"""
         if slot_index in self.equipped_items:
             del self.equipped_items[slot_index]
-            
-            # If this was the selected slot with equipped tool, clear it
-            if slot_index == self.selected_slot:
-                self.equipped_tool = None
-            
             return True
         return False
     
@@ -155,7 +136,13 @@ class ActionBar:
     
     def get_equipped_tool(self) -> Optional[str]:
         """Get the currently equipped tool for use"""
-        return self.equipped_tool
+        # Check the currently selected slot for a tool
+        if self.selected_slot in self.equipped_items:
+            item_id = self.equipped_items[self.selected_slot]
+            item_data = self.inventory.get_item_data(item_id)
+            if item_data and item_data.item_type == ItemType.TOOL:
+                return item_id
+        return None
     
     def use_selected_item(self) -> bool:
         """Use the currently selected item"""
@@ -241,10 +228,24 @@ class ActionBar:
         if not item_data:
             return
         
-        # Draw item icon
-        icon_surface = self.font_normal.render(item_data.icon, True, (255, 255, 255))
-        icon_rect = icon_surface.get_rect(center=slot_rect.center)
-        self.screen.blit(icon_surface, icon_rect)
+        # Draw item icon - use tool sprites for tools, text for others
+        if item_data.item_type == ItemType.TOOL:
+            # Try to get tool sprite from tileset
+            tool_sprite = self.tool_tileset.get_tool_icon(item_id, (40, 40))
+            if tool_sprite:
+                # Center the sprite in the slot
+                sprite_rect = tool_sprite.get_rect(center=slot_rect.center)
+                self.screen.blit(tool_sprite, sprite_rect)
+            else:
+                # Fallback to text icon if sprite not found
+                icon_surface = self.font_normal.render(item_data.icon, True, (255, 255, 255))
+                icon_rect = icon_surface.get_rect(center=slot_rect.center)
+                self.screen.blit(icon_surface, icon_rect)
+        else:
+            # Use text icon for non-tools
+            icon_surface = self.font_normal.render(item_data.icon, True, (255, 255, 255))
+            icon_rect = icon_surface.get_rect(center=slot_rect.center)
+            self.screen.blit(icon_surface, icon_rect)
         
         # Draw quantity if item is consumable and has quantity > 1
         if item_data.item_type in [ItemType.FOOD, ItemType.RESOURCE]:
